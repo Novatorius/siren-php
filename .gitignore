@@ -2,3 +2,6 @@
 /.phpunit.cache/
 .phpunit.result.cache
 composer.lock
+
+# Agent-generated KB context (do not commit — see AGENTS.md)
+.claude/kb-context.md
