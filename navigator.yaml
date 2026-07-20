@@ -2,6 +2,7 @@ initiative: siren
 ci:
   setup: composer install
   test: composer test
+  lint: composer lint
 knowledgeDependencies:
   - initiative: phpnomad
     description: "Org-wide engineering doctrine"

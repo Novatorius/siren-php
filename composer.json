@@ -32,6 +32,8 @@
         "guzzlehttp/guzzle": "^7.8"
     },
     "require-dev": {
+        "phpnomad/phpstan-rules": "^2.1",
+        "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^10.5"
     },
     "autoload": {
@@ -45,7 +47,8 @@
         }
     },
     "scripts": {
-        "test": "phpunit"
+        "test": "phpunit",
+        "lint": "phpstan analyse --no-progress"
     },
     "config": {
         "sort-packages": true

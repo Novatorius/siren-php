@@ -24,6 +24,10 @@ final class WebhookEventType
     public const CONVERSION_REJECTED = 'conversion.rejected';
     public const CONVERSION_RENEWED = 'conversion.renewed';
     public const COUPON_APPLIED = 'coupon.applied';
+    public const CREDIT_ISSUED = 'credit.issued';
+    public const CREDIT_REDEEMED = 'credit.redeemed';
+    public const CURRENCY_CREATED = 'currency.created';
+    public const CURRENCY_DELETED = 'currency.deleted';
     public const DISTRIBUTION_COMPLETED = 'distribution.completed';
     public const ENGAGEMENT_AWARDED = 'engagement.awarded';
     public const ENGAGEMENT_COMPLETED = 'engagement.completed';

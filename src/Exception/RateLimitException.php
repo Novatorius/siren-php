@@ -7,6 +7,9 @@ namespace Siren\Sdk\Exception;
 /** Raised for HTTP 429 responses — too many requests. */
 class RateLimitException extends SirenException
 {
+    /**
+     * @param array<string, mixed>|null $errorData
+     */
     public function __construct(
         string $message,
         int $statusCode = 429,
