@@ -41,6 +41,7 @@ after every change and leave them green:
 ```bash
 composer install   # ci.setup
 composer test   # ci.test
+composer lint   # ci.lint
 ```
 
 What "done" means (PR audit, testing tiers, UAT proof) is defined in the KB:
