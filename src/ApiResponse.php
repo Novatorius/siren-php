@@ -49,6 +49,8 @@ final class ApiResponse
      * The Siren API returns bare JSON — a plain array `[{...},{...}]` for list
      * endpoints and a plain object `{...}` for create/read-by-id endpoints.
      * There is no `{ "data": ... }` envelope to unwrap.
+     *
+     * @return array<int|string, mixed>
      */
     public function json(): array
     {

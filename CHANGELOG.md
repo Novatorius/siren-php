@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Typed taxonomy exports so integrations use SDK constants instead of magic
+  strings: `EventSlug` (built-in ingestion slugs) and the status vocabularies
+  `ConversionStatus`, `TransactionStatus`, `ObligationStatus`, `PayoutStatus`,
+  `FulfillmentStatus`, `OpportunityStatus`, `ApiKeyStatus`, and
+  `WebhookSubscriptionStatus`.
+- `WebhookEventType`: added the missing `CREDIT_ISSUED`, `CREDIT_REDEEMED`,
+  `CURRENCY_CREATED`, and `CURRENCY_DELETED` events (also added to
+  `openapi.yaml`), matching the full set Siren dispatches.
+- PHPStan static analysis (level 6) with the PHPNomad stack-elevator ruleset,
+  wired as `composer lint` and a CI lint job.
+
 ## [0.1.0] - 2026-07-11
 
 ### Added

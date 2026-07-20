@@ -123,6 +123,13 @@ $secret = $subscription['signingSecret'];
 - **Reconciliation readers** — paginated iterators over conversions, transactions, obligations, and payouts.
 - **Automatic retries** — network errors, 429s, and 5xx are retried with exponential backoff on idempotent operations; management writes are never auto-retried.
 - **Typed exceptions** — every error extends `Siren\Sdk\Exception\SirenException` and carries the status code, error code, and error data.
+- **Typed taxonomy** — Siren's domain vocabulary as constants, so no magic strings cross the boundary: `WebhookEventType`, `EventSlug`, and the status vocabularies (`ConversionStatus`, `TransactionStatus`, `ObligationStatus`, `PayoutStatus`, `FulfillmentStatus`, `OpportunityStatus`, `ApiKeyStatus`, `WebhookSubscriptionStatus`).
+
+```php
+use Siren\Sdk\ConversionStatus;
+
+$approved = $siren->conversions->list(['status' => ConversionStatus::APPROVED]);
+```
 
 ### Configuration
 

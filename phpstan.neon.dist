@@ -1,0 +1,17 @@
+includes:
+    # PHPNomad layer-purity ruleset (Stack Elevator: Core -> Service -> Platform).
+    # This SDK is a flat library (Siren\Sdk, no Core/Service segments), so the
+    # layer rules have nothing to flag today — they are wired in so that any
+    # future layered namespace is checked from day one.
+    - vendor/phpnomad/phpstan-rules/stack-elevator.neon
+
+parameters:
+    level: 6
+    paths:
+        - src
+    treatPhpDocTypesAsCertain: false
+    phpNomadStackElevator:
+        namespaceRoots:
+            - Siren
+            - Novatorius
+            - PHPNomad

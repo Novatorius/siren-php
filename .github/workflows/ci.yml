@@ -44,7 +44,32 @@ jobs:
           restore-keys: ${{ runner.os }}-php-${{ matrix.php }}-
 
       - name: Install dependencies
-        run: composer install --prefer-dist --no-interaction --no-progress
+        # phpnomad/phpstan-rules (dev-only static-analysis tooling, never loaded
+        # at test runtime) requires PHP ^8.2; the library itself supports 8.1.
+        # The 8.1 job ignores the platform check so the SDK + PHPUnit still run
+        # on the oldest supported PHP. The lint job runs on 8.3 with full checks.
+        run: composer install --prefer-dist --no-interaction --no-progress ${{ matrix.php == '8.1' && '--ignore-platform-req=php' || '' }}
 
       - name: Run test suite
         run: composer test
+
+  lint:
+    name: Lint (PHPStan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: json
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run PHPStan
+        run: composer lint

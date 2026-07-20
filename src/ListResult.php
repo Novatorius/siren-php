@@ -45,6 +45,7 @@ final class ListResult implements \IteratorAggregate, \Countable
         return $this->total;
     }
 
+    /** @return \ArrayIterator<int, array<string, mixed>> */
     public function getIterator(): \ArrayIterator
     {
         return new \ArrayIterator($this->data);

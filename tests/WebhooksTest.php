@@ -214,7 +214,8 @@ final class WebhooksTest extends TestCase
         $constants = (new \ReflectionClass(WebhookEventType::class))->getConstants();
 
         $this->assertSame('*', $constants['ALL']);
-        $this->assertCount(28, $constants, 'Expected 27 event types plus ALL.');
+        // The full canonical set is pinned in TaxonomyTest.
+        $this->assertCount(32, $constants, 'Expected 31 event types plus ALL.');
 
         foreach ($constants as $name => $value) {
             if ($name === 'ALL') {

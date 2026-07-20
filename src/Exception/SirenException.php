@@ -13,6 +13,9 @@ namespace Siren\Sdk\Exception;
  */
 class SirenException extends \RuntimeException
 {
+    /**
+     * @param array<string, mixed>|null $errorData
+     */
     public function __construct(
         string $message,
         private readonly int $statusCode = 0,
@@ -35,7 +38,11 @@ class SirenException extends \RuntimeException
         return $this->errorCode;
     }
 
-    /** Structured `error.data` from the response body, when present. */
+    /**
+     * Structured `error.data` from the response body, when present.
+     *
+     * @return array<string, mixed>|null
+     */
     public function getErrorData(): ?array
     {
         return $this->errorData;
