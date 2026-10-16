@@ -6,7 +6,15 @@ namespace Siren\Sdk\Tests;
 
 final class ReconciliationTest extends TestCase
 {
-    public function testListSendsPagingAndPassThroughFiltersAsQueryArgs(): void
+    /**
+     * Until 0.2.0 this test expected `page` and `perPage` to reach the API
+     * unchanged. Siren never read them: every list route runs
+     * PageSizeMiddleware, which reads `number` (page size) and `offset`
+     * (first row), so `page=2&perPage=50` silently returned the first ten
+     * rows. The behavior changed on purpose: the SDK keeps accepting
+     * `page`/`perPage` and translates them to the parameters Siren reads.
+     */
+    public function testListTranslatesPagingToNumberAndOffsetAndPassesFiltersThrough(): void
     {
         $siren = $this->mockSiren([self::jsonResponse(200, [])]);
 
@@ -17,7 +25,53 @@ final class ReconciliationTest extends TestCase
         $this->assertSame('/siren/v1/conversions', $request->getUri()->getPath());
 
         parse_str($request->getUri()->getQuery(), $query);
-        $this->assertSame(['page' => '2', 'perPage' => '50', 'status' => 'approved'], $query);
+        $this->assertSame(['status' => 'approved', 'number' => '50', 'offset' => '50'], $query);
+    }
+
+    public function testListPassesNumberAndOffsetThroughUnchanged(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(200, [])]);
+
+        $siren->obligations->list(['number' => 200, 'offset' => 400]);
+
+        parse_str($this->lastRequest()->getUri()->getQuery(), $query);
+        $this->assertSame(['number' => '200', 'offset' => '400'], $query);
+    }
+
+    public function testListReadsSirensPaginatedEnvelope(): void
+    {
+        // Every Siren list route wraps its rows with ListResponseWrapperInterceptor.
+        $siren = $this->mockSiren([
+            self::jsonResponse(200, [
+                'items' => [['id' => 7], ['id' => 8]],
+                'total' => 42,
+                'page' => 3,
+                'perPage' => 2,
+                'totalPages' => 21,
+            ]),
+        ]);
+
+        $result = $siren->payouts->list(['page' => 3, 'perPage' => 2]);
+
+        $this->assertSame([['id' => 7], ['id' => 8]], $result->getData());
+        $this->assertSame(3, $result->getPage());
+        $this->assertSame(2, $result->getPerPage());
+        $this->assertSame(42, $result->getTotal());
+        $this->assertSame(21, $result->getTotalPages());
+        $this->assertTrue($result->hasMore());
+    }
+
+    public function testAnEmptyEnvelopeIsAnEmptyPage(): void
+    {
+        $siren = $this->mockSiren([
+            self::jsonResponse(200, ['items' => [], 'total' => 0, 'page' => 1, 'perPage' => 10, 'totalPages' => 1]),
+        ]);
+
+        $result = $siren->conversions->list();
+
+        $this->assertSame([], $result->getData());
+        $this->assertSame(0, $result->getTotal());
+        $this->assertFalse($result->hasMore());
     }
 
     public function testListReturnsTheBareArrayBodyWithPagingEchoedFromParams(): void

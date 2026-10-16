@@ -4,19 +4,24 @@ declare(strict_types=1);
 
 namespace Siren\Sdk;
 
-use GuzzleHttp\Client;
-use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\GuzzleException;
-use GuzzleHttp\RequestOptions;
+use Siren\Sdk\Auth\AccessTokenSource;
 use Siren\Sdk\Exception\ConnectionException;
 use Siren\Sdk\Exception\ExceptionFactory;
+use Siren\Sdk\Http\HttpClient;
+use Siren\Sdk\Http\HttpClientException;
+use Siren\Sdk\Http\HttpRequest;
+use Siren\Sdk\Http\HttpResponse;
 
 /**
- * Internal HTTP layer: signs requests, joins URLs, retries, and maps errors.
+ * Internal HTTP layer: builds requests, signs them, retries, refreshes the
+ * access token after a 401, and maps errors to typed exceptions.
  *
  * Retries use exponential backoff and only apply to retryable operations
  * (reads and event ingestion) on network failures, 429s, and 5xx responses.
- * Management writes (create key, create subscription) never auto-retry.
+ * Writes to records and management calls never auto-retry.
+ *
+ * A 401 is different: Siren rejected the credential before doing any work,
+ * so the request is repeated once with a refreshed token whatever its kind.
  *
  * @internal
  */
@@ -24,29 +29,27 @@ final class HttpTransport
 {
     public const SDK_VERSION = '0.1.0';
 
-    private ClientInterface $client;
     private string $baseUrl;
     /** @var callable(float): void */
     private $sleeper;
 
     public function __construct(
-        private readonly string $apiKey,
+        private readonly AccessTokenSource $tokens,
         string $baseUrl,
         private readonly float $timeout,
         private readonly int $maxRetries,
-        ?ClientInterface $httpClient = null,
+        private readonly HttpClient $client,
         ?callable $sleeper = null,
     ) {
         $this->baseUrl = rtrim($baseUrl, '/');
-        $this->client = $httpClient ?? new Client();
         $this->sleeper = $sleeper ?? static function (float $seconds): void {
             usleep((int) round($seconds * 1_000_000));
         };
     }
 
     /**
-     * @param array<string, mixed>|null $json  JSON request body, or null for none.
-     * @param array<string, mixed>      $query Query string parameters.
+     * @param array<int|string, mixed>|null $json  JSON request body, or null for none.
+     * @param array<string, mixed>          $query Query string parameters.
      * @param bool $retryable Whether network errors, 429s, and 5xx responses may be retried.
      *
      * @throws \Siren\Sdk\Exception\SirenException
@@ -60,31 +63,30 @@ final class HttpTransport
     ): ApiResponse {
         $url = $this->baseUrl . $path;
 
-        $options = [
-            RequestOptions::HTTP_ERRORS => false,
-            RequestOptions::TIMEOUT => $this->timeout,
-            RequestOptions::CONNECT_TIMEOUT => $this->timeout,
-            RequestOptions::HEADERS => [
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Accept' => 'application/json',
-                'User-Agent' => 'siren-php-sdk/' . self::SDK_VERSION,
-            ],
+        if ($query !== []) {
+            $url .= '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        }
+
+        $headers = [
+            'Accept' => 'application/json',
+            'User-Agent' => 'siren-php-sdk/' . self::SDK_VERSION,
         ];
+        $body = null;
 
         if ($json !== null) {
-            $options[RequestOptions::JSON] = $json;
+            $headers['Content-Type'] = 'application/json';
+            $body = json_encode($json, JSON_THROW_ON_ERROR);
         }
 
-        if ($query !== []) {
-            $options[RequestOptions::QUERY] = $query;
-        }
-
+        $token = $this->tokens->getAccessToken();
+        $request = new HttpRequest($method, $url, $headers, $body, $this->timeout);
         $attempt = 0;
+        $refreshed = false;
 
         while (true) {
             try {
-                $response = $this->client->request($method, $url, $options);
-            } catch (GuzzleException $e) {
+                $response = $this->client->send($request->withHeader('Authorization', 'Bearer ' . $token));
+            } catch (HttpClientException $e) {
                 if ($retryable && $attempt < $this->maxRetries) {
                     $this->backOff($attempt++);
                     continue;
@@ -95,25 +97,40 @@ final class HttpTransport
                     0,
                     null,
                     null,
-                    $e,
+                    $e->getPrevious() ?? $e,
                 );
             }
 
             $status = $response->getStatusCode();
 
             if ($status < 400) {
-                return new ApiResponse($status, $response->getHeaders(), (string) $response->getBody());
+                return new ApiResponse($status, $response->getHeaders(), $response->getBody());
+            }
+
+            if ($status === 401 && !$refreshed) {
+                $refreshed = true;
+                $fresh = $this->tokens->refreshAccessToken($token);
+
+                if ($fresh !== null && $fresh !== '') {
+                    $token = $fresh;
+                    continue;
+                }
             }
 
             if ($retryable && $attempt < $this->maxRetries && ($status === 429 || $status >= 500)) {
-                $retryAfterHeader = $response->getHeaderLine('Retry-After');
-                $retryAfter = is_numeric($retryAfterHeader) ? (float) $retryAfterHeader : null;
-                $this->backOff($attempt++, $retryAfter);
+                $this->backOff($attempt++, $this->retryAfter($response));
                 continue;
             }
 
             throw ExceptionFactory::fromResponse($response);
         }
+    }
+
+    private function retryAfter(HttpResponse $response): ?float
+    {
+        $header = $response->getHeaderLine('Retry-After');
+
+        return is_numeric($header) ? (float) $header : null;
     }
 
     /**

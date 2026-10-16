@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Siren\Sdk\Exception;
 
-use Psr\Http\Message\ResponseInterface;
+use Siren\Sdk\Http\HttpResponse;
 
 /**
  * Maps HTTP error responses to the SDK's typed exceptions.
@@ -13,11 +13,11 @@ use Psr\Http\Message\ResponseInterface;
  */
 final class ExceptionFactory
 {
-    public static function fromResponse(ResponseInterface $response): SirenException
+    public static function fromResponse(HttpResponse $response): SirenException
     {
         $status = $response->getStatusCode();
 
-        $body = json_decode((string) $response->getBody(), true);
+        $body = json_decode($response->getBody(), true);
 
         $message = sprintf('The Siren API returned an HTTP %d error.', $status);
         $code = null;

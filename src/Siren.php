@@ -4,10 +4,25 @@ declare(strict_types=1);
 
 namespace Siren\Sdk;
 
-use GuzzleHttp\ClientInterface;
+use Siren\Sdk\Auth\AccessTokenSource;
+use Siren\Sdk\Auth\StaticAccessToken;
+use Siren\Sdk\Http\GuzzleHttpClient;
+use Siren\Sdk\Http\HttpClient;
+use Siren\Sdk\Http\StreamHttpClient;
 use Siren\Sdk\Resources\ApiKeys;
+use Siren\Sdk\Resources\CollaboratorGroups;
+use Siren\Sdk\Resources\Collaborators;
+use Siren\Sdk\Resources\Conversions;
+use Siren\Sdk\Resources\Credits;
+use Siren\Sdk\Resources\CustomCurrencies;
+use Siren\Sdk\Resources\Distributors;
+use Siren\Sdk\Resources\Engagements;
 use Siren\Sdk\Resources\Events;
 use Siren\Sdk\Resources\ListResource;
+use Siren\Sdk\Resources\Opportunities;
+use Siren\Sdk\Resources\ProgramGroups;
+use Siren\Sdk\Resources\Programs;
+use Siren\Sdk\Resources\Transactions;
 use Siren\Sdk\Resources\Webhooks;
 
 /**
@@ -25,13 +40,20 @@ use Siren\Sdk\Resources\Webhooks;
  * ```
  *
  * Configuration keys:
- * - `apiKey` (required) — the `sk_live_...` key from the Siren dashboard.
+ * - `apiKey` — the `sk_live_...` key from the Siren dashboard. Required
+ *   unless `accessToken` is given.
+ * - `accessToken` — an {@see AccessTokenSource} (or a plain token string)
+ *   for hosts that hold an OAuth grant. The SDK refreshes it once after a
+ *   401 and repeats the request.
  * - `baseUrl` — defaults to `https://api.sirenaffiliates.com/siren/v1`.
  * - `timeout` — request timeout in seconds, default 30.
  * - `maxRetries` — retries for network errors and 429/5xx on idempotent
- *   operations, default 2. Management writes (create key, create
- *   subscription) are never auto-retried.
- * - `httpClient` — an optional preconfigured `GuzzleHttp\ClientInterface`.
+ *   operations, default 2. Writes and management calls are never
+ *   auto-retried.
+ * - `httpClient` — the HTTP stack to send requests through: an
+ *   {@see HttpClient} the host implements, or a preconfigured
+ *   `GuzzleHttp\ClientInterface`. Without one, the SDK uses Guzzle when it
+ *   is installed and PHP streams when it is not.
  */
 class Siren
 {
@@ -48,11 +70,11 @@ class Siren
     /** Manage API keys: `create`, `list`, `revoke`. */
     public readonly ApiKeys $apiKeys;
 
-    /** Reconciliation reader for `GET /conversions`. */
-    public readonly ListResource $conversions;
+    /** Conversions: list, read, create, update, delete, and bulk actions. */
+    public readonly Conversions $conversions;
 
-    /** Reconciliation reader for `GET /transactions`. */
-    public readonly ListResource $transactions;
+    /** Transactions and their details: list, read, create, and bulk actions. */
+    public readonly Transactions $transactions;
 
     /** Reconciliation reader for `GET /obligations`. */
     public readonly ListResource $obligations;
@@ -60,25 +82,46 @@ class Siren
     /** Reconciliation reader for `GET /payouts`. */
     public readonly ListResource $payouts;
 
+    /** Collaborators, with their tracking codes (`->aliases`) and program enrollments (`->enrollments`). */
+    public readonly Collaborators $collaborators;
+
+    /** Programs. */
+    public readonly Programs $programs;
+
+    /** Program groups. */
+    public readonly ProgramGroups $programGroups;
+
+    /** Opportunities: list, read, and update. */
+    public readonly Opportunities $opportunities;
+
+    /** Engagements: list and read. */
+    public readonly Engagements $engagements;
+
+    /** Distributors. */
+    public readonly Distributors $distributors;
+
+    /** Custom currencies, keyed by code. */
+    public readonly CustomCurrencies $customCurrencies;
+
+    /** Store credit adjustments and balances. */
+    public readonly Credits $credits;
+
+    /** Collaborator groups and their members (`->members`). */
+    public readonly CollaboratorGroups $collaboratorGroups;
+
     /**
      * @param array{
-     *     apiKey: string,
+     *     apiKey?: string,
+     *     accessToken?: AccessTokenSource|string,
      *     baseUrl?: string,
      *     timeout?: float|int,
      *     maxRetries?: int,
-     *     httpClient?: ClientInterface,
+     *     httpClient?: HttpClient|\GuzzleHttp\ClientInterface,
+     *     sleeper?: callable(float): void,
      * } $config
      */
     public function __construct(array $config)
     {
-        $apiKey = $config['apiKey'] ?? null;
-
-        if (!is_string($apiKey) || $apiKey === '') {
-            throw new \InvalidArgumentException(
-                'The "apiKey" option is required. Mint one in the Siren dashboard (Settings > API Keys).',
-            );
-        }
-
         $maxRetries = (int) ($config['maxRetries'] ?? self::DEFAULT_MAX_RETRIES);
 
         if ($maxRetries < 0) {
@@ -86,20 +129,84 @@ class Siren
         }
 
         $transport = new HttpTransport(
-            apiKey: $apiKey,
+            tokens: self::resolveTokens($config),
             baseUrl: (string) ($config['baseUrl'] ?? self::DEFAULT_BASE_URL),
             timeout: (float) ($config['timeout'] ?? self::DEFAULT_TIMEOUT),
             maxRetries: $maxRetries,
-            httpClient: $config['httpClient'] ?? null,
+            client: self::resolveHttpClient($config['httpClient'] ?? null),
             sleeper: $config['sleeper'] ?? null,
         );
 
         $this->events = new Events($transport);
         $this->webhooks = new Webhooks($transport);
         $this->apiKeys = new ApiKeys($transport);
-        $this->conversions = new ListResource($transport, '/conversions');
-        $this->transactions = new ListResource($transport, '/transactions');
+        $this->conversions = new Conversions($transport);
+        $this->transactions = new Transactions($transport);
         $this->obligations = new ListResource($transport, '/obligations');
         $this->payouts = new ListResource($transport, '/payouts');
+        $this->collaborators = new Collaborators($transport);
+        $this->programs = new Programs($transport);
+        $this->programGroups = new ProgramGroups($transport);
+        $this->opportunities = new Opportunities($transport);
+        $this->engagements = new Engagements($transport);
+        $this->distributors = new Distributors($transport);
+        $this->customCurrencies = new CustomCurrencies($transport);
+        $this->credits = new Credits($transport);
+        $this->collaboratorGroups = new CollaboratorGroups($transport);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private static function resolveTokens(array $config): AccessTokenSource
+    {
+        $accessToken = $config['accessToken'] ?? null;
+        $apiKey = $config['apiKey'] ?? null;
+
+        if ($accessToken !== null && $apiKey !== null) {
+            throw new \InvalidArgumentException('Pass either "apiKey" or "accessToken", not both.');
+        }
+
+        if ($accessToken instanceof AccessTokenSource) {
+            return $accessToken;
+        }
+
+        if (is_string($accessToken) && $accessToken !== '') {
+            return new StaticAccessToken($accessToken);
+        }
+
+        if ($accessToken !== null) {
+            throw new \InvalidArgumentException(
+                'The "accessToken" option must be a non-empty string or a ' . AccessTokenSource::class . '.',
+            );
+        }
+
+        if (!is_string($apiKey) || $apiKey === '') {
+            throw new \InvalidArgumentException(
+                'The "apiKey" option is required. Mint one in the Siren dashboard (Settings > API Keys), '
+                . 'or pass an "accessToken" source.',
+            );
+        }
+
+        return new StaticAccessToken($apiKey);
+    }
+
+    private static function resolveHttpClient(mixed $httpClient): HttpClient
+    {
+        if ($httpClient instanceof HttpClient) {
+            return $httpClient;
+        }
+
+        if ($httpClient instanceof \GuzzleHttp\ClientInterface) {
+            return new GuzzleHttpClient($httpClient);
+        }
+
+        if ($httpClient !== null) {
+            throw new \InvalidArgumentException(
+                'The "httpClient" option must be a ' . HttpClient::class . ' or a GuzzleHttp\ClientInterface.',
+            );
+        }
+
+        return GuzzleHttpClient::isAvailable() ? new GuzzleHttpClient() : new StreamHttpClient();
     }
 }

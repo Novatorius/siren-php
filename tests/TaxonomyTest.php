@@ -7,12 +7,17 @@ namespace Siren\Sdk\Tests;
 use PHPUnit\Framework\TestCase as BaseTestCase;
 use ReflectionClass;
 use Siren\Sdk\ApiKeyStatus;
+use Siren\Sdk\CollaboratorStatus;
 use Siren\Sdk\ConversionStatus;
+use Siren\Sdk\CustomCurrencyType;
+use Siren\Sdk\DistributorStatus;
 use Siren\Sdk\EventSlug;
 use Siren\Sdk\FulfillmentStatus;
 use Siren\Sdk\ObligationStatus;
 use Siren\Sdk\OpportunityStatus;
 use Siren\Sdk\PayoutStatus;
+use Siren\Sdk\ProgramGroupSorter;
+use Siren\Sdk\ProgramStatus;
 use Siren\Sdk\TransactionStatus;
 use Siren\Sdk\WebhookEventType;
 use Siren\Sdk\WebhookSubscriptionStatus;
@@ -145,5 +150,34 @@ final class TaxonomyTest extends BaseTestCase
     public function testWebhookSubscriptionStatusMatchesCanonicalSet(): void
     {
         $this->assertSame(['active', 'paused'], $this->constantValues(WebhookSubscriptionStatus::class));
+    }
+    public function testCollaboratorStatusMatchesCanonicalSet(): void
+    {
+        // Siren's CollaboratorStatusProvider (create and update statuses)
+        // plus `deleted`, which DELETE and the delete bulk action set.
+        $this->assertSame(
+            ['active', 'deleted', 'inactive', 'pending', 'rejected'],
+            $this->constantValues(CollaboratorStatus::class)
+        );
+    }
+
+    public function testProgramStatusMatchesCanonicalSet(): void
+    {
+        $this->assertSame(['active', 'deleted', 'inactive'], $this->constantValues(ProgramStatus::class));
+    }
+
+    public function testDistributorStatusMatchesCanonicalSet(): void
+    {
+        $this->assertSame(['active', 'deleted', 'inactive'], $this->constantValues(DistributorStatus::class));
+    }
+
+    public function testProgramGroupSorterMatchesCanonicalSet(): void
+    {
+        $this->assertSame(['newestBindingWins', 'oldestBindingWins'], $this->constantValues(ProgramGroupSorter::class));
+    }
+
+    public function testCustomCurrencyTypeMatchesCanonicalSet(): void
+    {
+        $this->assertSame(['internal', 'monetary'], $this->constantValues(CustomCurrencyType::class));
     }
 }
