@@ -28,13 +28,16 @@
     ],
     "require": {
         "php": ">=8.1",
-        "ext-json": "*",
-        "guzzlehttp/guzzle": "^7.8"
+        "ext-json": "*"
     },
     "require-dev": {
+        "guzzlehttp/guzzle": "^7.8",
         "phpnomad/phpstan-rules": "^2.1",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^10.5"
+    },
+    "suggest": {
+        "guzzlehttp/guzzle": "The default HTTP client when installed (^7.8). Without it the SDK uses PHP streams, or the HttpClient you pass as the httpClient option."
     },
     "autoload": {
         "psr-4": {

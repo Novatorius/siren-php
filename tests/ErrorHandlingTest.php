@@ -326,4 +326,38 @@ final class ErrorHandlingTest extends TestCase
             );
         }
     }
+    public function testReadsSirensContextErrorFormAndValidationFailures(): void
+    {
+        // Siren's REST layer answers a failed validation with 400 and
+        // {"error": {"message", "context": {"type", "failedValidations"}}}.
+        $failures = ['trackingId' => ['That tracking code is taken.']];
+        $siren = $this->mockSiren(
+            [self::jsonResponse(400, ['error' => [
+                'message' => 'Validations failed.',
+                'context' => ['type' => 'VALIDATION_FAILED', 'failedValidations' => $failures],
+            ]])],
+            ['maxRetries' => 0],
+        );
+
+        try {
+            $siren->collaborators->update(8, ['trackingId' => 'TAKEN']);
+            $this->fail('Expected a BadRequestException.');
+        } catch (BadRequestException $e) {
+            $this->assertSame('Validations failed.', $e->getMessage());
+            $this->assertSame(BadRequestException::VALIDATION_FAILED, $e->getErrorCode());
+            $this->assertSame($failures, $e->getFieldErrors());
+        }
+    }
+
+    public function testAPlain400HasNoFieldErrors(): void
+    {
+        $siren = $this->mockSiren([self::stringErrorResponse(400, 'number must be a whole number from 1 to 200.')], ['maxRetries' => 0]);
+
+        try {
+            $siren->programs->list(['number' => 0]);
+            $this->fail('Expected a BadRequestException.');
+        } catch (BadRequestException $e) {
+            $this->assertSame([], $e->getFieldErrors());
+        }
+    }
 }

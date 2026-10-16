@@ -8,14 +8,29 @@ info:
     visits, subscribe to program events via signed webhooks, and reconcile
     Siren's ledger against its own.
 
-    This document describes the **developer-facing surface**: event ingestion,
-    webhooks, API keys, and read endpoints for reconciliation. The full admin
-    surface used by the Siren dashboard is intentionally out of scope here.
+    This document describes the **developer and connector surface**: event
+    ingestion, webhooks, API keys, and the record endpoints a connector (such
+    as the Siren WordPress plugin connected to Siren Cloud) reads and writes:
+    collaborators and their tracking codes and program enrollments,
+    programs, program groups, opportunities, transactions, conversions,
+    engagements, distributors, custom currencies, store credit, and
+    collaborator groups.
 
-    All requests authenticate with an API key as a bearer token
-    (`Authorization: Bearer sk_live_...`). Responses are wrapped as
-    `{ "data": ... }` on success and `{ "error": { "message", "code" } }` on
-    failure.
+    Requests authenticate with a bearer token. Event ingestion
+    (`POST /event/{eventSlug}`) accepts an organization API key
+    (`Authorization: Bearer sk_live_...`) or a connected site's OAuth access
+    token. As of Siren 3.6, the other routes in this document accept only a
+    signed-in dashboard session and answer 401 to an API key or a connector
+    token.
+
+    Successful responses are bare JSON: an object for one record, and the
+    list envelope `{ "items", "total", "page", "perPage", "totalPages" }`
+    for lists. Lists page with `number` (page size, at most 200) and
+    `offset`. Failures return `{ "error": ... }`, where `error` is a string
+    or `{ "message", "code", "data" }`.
+
+    Record deletes are two-stage. The first DELETE marks the record
+    `deleted` and returns it, and a second DELETE removes it.
   contact:
     name: Siren
     url: https://sirenaffiliates.com
@@ -28,6 +43,7 @@ servers:
     description: Local development
 security:
   - apiKey: []
+  - connectorToken: []
 tags:
   - name: Events
     description: Ingest commerce and tracking events.
@@ -37,6 +53,32 @@ tags:
     description: Manage API keys.
   - name: Reconciliation
     description: Read Siren's ledger to reconcile against your own records.
+  - name: Collaborators
+    description: |
+      Affiliates and partners. Tracking codes are read through the `aliases`
+      and `referralCode` fields and set through `trackingId`. Program
+      enrollments are read through the `programs` field or the `programId`
+      filter, and written through the bulk actions or `programs` on update.
+  - name: Programs
+    description: Incentive rules that turn engagements into rewards.
+  - name: Program Groups
+    description: Sets of programs that compete for the same engagement.
+  - name: Opportunities
+    description: A tracked visitor's chance to convert.
+  - name: Transactions
+    description: Transactions and their line-item details.
+  - name: Conversions
+    description: Engagements that turned into a reward.
+  - name: Engagements
+    description: A collaborator's claim on an opportunity in one program. Read only.
+  - name: Distributors
+    description: Revenue pools shared among collaborators on a schedule.
+  - name: Custom Currencies
+    description: Points, store credit, and other organization-defined units, keyed by code.
+  - name: Credits
+    description: Store credit adjustments.
+  - name: Collaborator Groups
+    description: Named sets of collaborators that programs and distributors target.
 paths:
   /event/sale:
     post:
@@ -254,38 +296,1392 @@ paths:
         '200': { description: Revoked. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /conversions:
+  /collaborators:
     get:
-      tags: [Reconciliation]
-      operationId: listConversions
-      summary: List conversions
+      tags: [Collaborators]
+      operationId: listCollaborators
+      summary: List collaborators
+      description: |
+        Filters on `id`, `status`, `fullName`, `nickname`, and `email` match exactly, and a
+        comma-separated value means "any of". `s` searches name, nickname, email, and
+        tracking codes. Ask for `aliases`, `referralCode`, `programs`, `distributors`,
+        `creditBalances`, or `groups` through `fields`.
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, status, fullName, nickname, email, dateCreated, dateModified] }
+        - name: id
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: fullName
+          in: query
+          schema: { type: string }
+        - name: nickname
+          in: query
+          schema: { type: string }
+        - name: email
+          in: query
+          schema: { type: string }
+        - { $ref: '#/components/parameters/Search' }
+        - name: programId
+          in: query
+          schema: { type: integer }
+          description: Only collaborators enrolled in this program.
+        - name: distributorId
+          in: query
+          schema: { type: integer }
+          description: Only collaborators this distributor covers.
       responses:
         '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Collaborators]
+      operationId: createCollaborator
+      summary: Create a collaborator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName, nickname, email, status]
+              properties:
+                fullName: { type: string }
+                nickname: { type: string }
+                email: { type: string, format: email }
+                status: { type: string, enum: [active, inactive, pending] }
+                trackingId: { type: string, description: The tracking code. One is generated when empty. }
+                programs: { type: array, items: { type: integer } }
+                distributors: { type: array, items: { type: integer } }
+                groups: { type: array, items: { type: integer } }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /collaborators/{id}:
+    get:
+      tags: [Collaborators]
+      operationId: getCollaborator
+      summary: Get a collaborator
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Collaborators]
+      operationId: updateCollaborator
+      summary: Update a collaborator
+      description: |
+        Send only the fields to change. `programs` replaces the collaborator's
+        program enrollments, and `trackingId` gives them a new tracking code.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fullName: { type: string }
+                nickname: { type: string }
+                email: { type: string, format: email }
+                status: { type: string, enum: [active, inactive, pending, rejected] }
+                trackingId: { type: string, description: A new tracking code. Empty leaves it unchanged. }
+                programs: { type: array, items: { type: integer }, description: Replaces every program enrollment. }
+                distributors: { type: array, items: { type: integer } }
+                groups: { type: array, items: { type: integer } }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Collaborators]
+      operationId: deleteCollaborator
+      summary: Delete a collaborator
+      description: |
+        The first call marks the record `deleted` and returns it. A second call on a
+        deleted record removes it and answers 204.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /collaborators/bulk:
+    post:
+      tags: [Collaborators]
+      operationId: bulkCollaborators
+      summary: Run a bulk action on collaborators
+      description: |
+        `addToProgram` and `removeFromProgram` enroll and unenroll collaborators in
+        one program without touching their other enrollments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, ids]
+              properties:
+                action: { type: string, enum: [activate, deactivate, restore, delete, permanent_delete, addToProgram, removeFromProgram, addToDistributor, removeFromDistributor, sendSignupEmail] }
+                ids: { type: array, items: { type: integer } }
+                programId: { type: integer, description: Required by addToProgram and removeFromProgram. }
+                distributorId: { type: integer, description: Required by addToDistributor and removeFromDistributor. }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /collaborators/status-types:
+    get:
+      tags: [Collaborators]
+      operationId: listCollaboratorStatusTypes
+      summary: List collaborator statuses
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /collaborators/generate-referral-code:
+    get:
+      tags: [Collaborators]
+      operationId: generateReferralCode
+      summary: Suggest an unused tracking code
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /programs:
+    get:
+      tags: [Programs]
+      operationId: listPrograms
+      summary: List programs
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, name, description, incentiveType, incentiveResolverType, status, units, dateCreated, dateModified] }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: incentiveType
+          in: query
+          schema: { type: string }
+        - name: incentiveResolverType
+          in: query
+          schema: { type: string }
+        - name: units
+          in: query
+          schema: { type: string }
+        - { $ref: '#/components/parameters/Search' }
+        - name: programGroupId
+          in: query
+          schema: { type: integer }
+          description: Only programs in this program group.
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Programs]
+      operationId: createProgram
+      summary: Create a program
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, description, status, incentiveType, incentiveResolverType, units, engagementTypes]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                status: { type: string, enum: [active, inactive] }
+                incentiveType: { type: string }
+                incentiveResolverType: { type: string }
+                units: { type: string, description: A currency code. }
+                engagementTypes: { type: object, additionalProperties: true, description: "Engagement type to {calculationType, calculationArgs}." }
+                incentiveTypeArgs: { type: object, additionalProperties: true }
+                collaboratorIds: { type: array, items: { type: integer } }
+                collaboratorGroupId: { type: integer }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /programs/{id}:
+    get:
+      tags: [Programs]
+      operationId: getProgram
+      summary: Get a program
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Programs]
+      operationId: updateProgram
+      summary: Update a program
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                status: { type: string, enum: [active, inactive] }
+                incentiveType: { type: string }
+                incentiveResolverType: { type: string }
+                units: { type: string }
+                engagementTypes: { type: object, additionalProperties: true, description: Replaces the program's engagement rules. }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Programs]
+      operationId: deleteProgram
+      summary: Delete a program
+      description: |
+        The first call marks the record `deleted` and returns it. A second call on a
+        deleted record removes it and answers 204.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /programs/bulk:
+    post:
+      tags: [Programs]
+      operationId: bulkPrograms
+      summary: Run a bulk action on programs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, ids]
+              properties:
+                action: { type: string, enum: [activate, deactivate, restore, delete, permanent_delete] }
+                ids: { type: array, items: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /programs/status-types:
+    get:
+      tags: [Programs]
+      operationId: listProgramStatusTypes
+      summary: List program statuses
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /programs/incentive-types:
+    get:
+      tags: [Programs]
+      operationId: listProgramIncentiveTypes
+      summary: List incentive types
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /programs/currency-types:
+    get:
+      tags: [Programs]
+      operationId: listProgramCurrencyTypes
+      summary: List program currencies
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /program-groups:
+    get:
+      tags: [Program Groups]
+      operationId: listProgramGroups
+      summary: List program groups
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, name, description, sorter] }
+        - name: sorter
+          in: query
+          schema: { type: string, enum: [oldestBindingWins, newestBindingWins] }
+        - { $ref: '#/components/parameters/Search' }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Program Groups]
+      operationId: createProgramGroup
+      summary: Create a program group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, description, sorter]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                sorter: { type: string, enum: [oldestBindingWins, newestBindingWins] }
+                programs: { type: array, items: { type: integer } }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /program-groups/{id}:
+    get:
+      tags: [Program Groups]
+      operationId: getProgramGroup
+      summary: Get a program group
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Program Groups]
+      operationId: updateProgramGroup
+      summary: Update a program group
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                sorter: { type: string, enum: [oldestBindingWins, newestBindingWins] }
+                programs: { type: array, items: { type: integer }, description: Replaces the group's programs. }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Program Groups]
+      operationId: deleteProgramGroup
+      summary: Delete a program group
+      description: |
+        Deletes the program group for good and answers 204.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /program-groups/bulk:
+    post:
+      tags: [Program Groups]
+      operationId: bulkProgramGroups
+      summary: Run a bulk action on program groups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, ids]
+              properties:
+                action: { type: string, enum: [delete] }
+                ids: { type: array, items: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /opportunities:
+    get:
+      tags: [Opportunities]
+      operationId: listOpportunities
+      summary: List opportunities
+      description: |
+        Siren opens opportunities when it ingests a `site-visited` event. There is
+        no create or delete route.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, status, lastTriggered, dateCreated, dateModified] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, inactive, invalid] }
+        - name: collaboratorId
+          in: query
+          schema: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /opportunities/{id}:
+    get:
+      tags: [Opportunities]
+      operationId: getOpportunity
+      summary: Get an opportunity
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Opportunities]
+      operationId: updateOpportunity
+      summary: Update an opportunity
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [active, inactive] }
+                lastTriggered: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /transactions:
     get:
-      tags: [Reconciliation]
+      tags: [Transactions]
       operationId: listTransactions
       summary: List transactions
+      description: |
+        Ask for `details`, `detailCount`, `totalValue`, `totalQuantity`, or
+        `currency` through `fields`.
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, status, dateCreated] }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: include
+          in: query
+          schema: { type: string }
+          description: Send `extended` for the summary fields when `fields` is not given.
       responses:
         '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Transactions]
+      operationId: createTransaction
+      summary: Create a transaction
+      description: |
+        Records a transaction directly. Commerce sales should use `POST /event/sale`,
+        which also runs attribution.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [details]
+              properties:
+                details: { type: array, minItems: 1, items: { $ref: '#/components/schemas/TransactionDetail' } }
+                bindingId: { type: string, description: An external reference Siren stores as a mapping. }
+                bindingDataType: { type: string, description: The external reference type. }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /transactions/{id}:
+    get:
+      tags: [Transactions]
+      operationId: getTransaction
+      summary: Get a transaction
+      description: |
+        Send `fields=id,details` for the line-item details.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+        - name: include
+          in: query
+          schema: { type: string }
+          description: Send `extended` for the summary fields when `fields` is not given.
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /transactions/bulk:
+    post:
+      tags: [Transactions]
+      operationId: bulkTransactions
+      summary: Run a bulk action on transactions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, ids]
+              properties:
+                action: { type: string, enum: [cancel, refund, delete] }
+                ids: { type: array, items: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /transactions/credit-collaborator:
+    post:
+      tags: [Transactions]
+      operationId: creditTransactionsToCollaborator
+      summary: Credit transactions to a collaborator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transactionIds, collaboratorId]
+              properties:
+                transactionIds: { type: array, items: { type: integer } }
+                collaboratorId: { type: integer }
+                type: { type: string, description: The conversion type to create. }
+      responses:
+        '200':
+          description: Credited.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /transactions/sources:
+    get:
+      tags: [Transactions]
+      operationId: listTransactionSources
+      summary: List transaction sources
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /conversions:
+    get:
+      tags: [Conversions]
+      operationId: listConversions
+      summary: List conversions
+      description: |
+        `collaboratorId` and `programId` are resolved through the conversion's
+        engagement.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, engagementId, type, status, dateCreated] }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: engagementId
+          in: query
+          schema: { type: integer }
+        - name: type
+          in: query
+          schema: { type: string }
+        - name: obligationId
+          in: query
+          schema: { type: integer }
+        - name: transactionId
+          in: query
+          schema: { type: integer }
+        - name: collaboratorId
+          in: query
+          schema: { type: integer }
+        - name: programId
+          in: query
+          schema: { type: integer }
+        - name: include
+          in: query
+          schema: { type: string }
+          description: Send `extended` for the summary fields when `fields` is not given.
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Conversions]
+      operationId: createConversion
+      summary: Create a conversion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [engagementId, type, status]
+              properties:
+                engagementId: { type: integer }
+                type: { type: string }
+                status: { type: string, enum: [pending, approved, rejected, expired] }
+                transactionId: { type: integer }
+                obligationId: { type: integer }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /conversions/{id}:
+    get:
+      tags: [Conversions]
+      operationId: getConversion
+      summary: Get a conversion
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+        - name: include
+          in: query
+          schema: { type: string }
+          description: Send `extended` for the summary fields when `fields` is not given.
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Conversions]
+      operationId: updateConversion
+      summary: Update a conversion
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                engagementId: { type: integer }
+                type: { type: string }
+                status: { type: string, enum: [pending, approved, rejected, expired] }
+                transactionId: { type: integer }
+                obligationId: { type: integer }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Conversions]
+      operationId: deleteConversion
+      summary: Delete a conversion
+      description: |
+        The first call marks the record `deleted` and returns it. A second call on a
+        deleted record removes it and answers 204.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /conversions/bulk:
+    post:
+      tags: [Conversions]
+      operationId: bulkConversions
+      summary: Run a bulk action on conversions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, ids]
+              properties:
+                action: { type: string, enum: [approve, reject, markPending, delete, permanent_delete] }
+                ids: { type: array, items: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /conversions/types:
+    get:
+      tags: [Conversions]
+      operationId: listConversionTypes
+      summary: List conversion types
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /engagements:
+    get:
+      tags: [Engagements]
+      operationId: listEngagements
+      summary: List engagements
+      description: |
+        Siren creates engagements while it processes events, so the routes only read.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, opportunityId, programId, collaboratorId, score, status, source, dateCreated, dateModified] }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: collaboratorId
+          in: query
+          schema: { type: integer }
+        - name: programId
+          in: query
+          schema: { type: integer }
+        - name: opportunityId
+          in: query
+          schema: { type: integer }
+        - name: include
+          in: query
+          schema: { type: string }
+          description: Send `extended` for the summary fields when `fields` is not given.
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /engagements/{id}:
+    get:
+      tags: [Engagements]
+      operationId: getEngagement
+      summary: Get an engagement
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+        - name: include
+          in: query
+          schema: { type: string }
+          description: Send `extended` for the summary fields when `fields` is not given.
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /engagements/types:
+    get:
+      tags: [Engagements]
+      operationId: listEngagementTypes
+      summary: List engagement types
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /engagements/calculations:
+    get:
+      tags: [Engagements]
+      operationId: listEngagementCalculations
+      summary: List engagement calculations
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /distributors:
+    get:
+      tags: [Distributors]
+      operationId: listDistributors
+      summary: List distributors
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, name, status, dateCreated] }
+        - name: status
+          in: query
+          schema: { type: string }
+        - { $ref: '#/components/parameters/Search' }
+        - name: include
+          in: query
+          schema: { type: string }
+          description: Send `extended` for the summary fields when `fields` is not given.
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Distributors]
+      operationId: createDistributor
+      summary: Create a distributor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, description, distributionResolver, distributionPoolResolver, status, units]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                distributionResolver: { type: string }
+                distributionPoolResolver: { type: string, example: revenueSinceLastDistribution }
+                status: { type: string, enum: [active, inactive] }
+                units: { type: string }
+                revenuePercentage: { type: number }
+                schedule: { type: array, items: { type: string }, example: [first day of next month] }
+                engagementTypes: { type: object, additionalProperties: true }
+                collaboratorIds: { type: array, items: { type: integer } }
+                collaboratorGroupId: { type: integer }
+                transactionCompilers: { type: object, additionalProperties: true }
+                lineItemFilters: { type: object, additionalProperties: true }
+                postAllocationActions: { type: object, additionalProperties: true }
+                metricFilters: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /distributors/{id}:
+    get:
+      tags: [Distributors]
+      operationId: getDistributor
+      summary: Get a distributor
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+        - name: include
+          in: query
+          schema: { type: string }
+          description: Send `extended` for the summary fields when `fields` is not given.
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Distributors]
+      operationId: updateDistributor
+      summary: Update a distributor
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                distributionResolver: { type: string }
+                distributionPoolResolver: { type: string, example: revenueSinceLastDistribution }
+                status: { type: string, enum: [active, inactive] }
+                units: { type: string }
+                revenuePercentage: { type: number }
+                schedule: { type: array, items: { type: string }, example: [first day of next month] }
+                engagementTypes: { type: object, additionalProperties: true }
+                collaboratorIds: { type: array, items: { type: integer } }
+                collaboratorGroupId: { type: integer }
+                transactionCompilers: { type: object, additionalProperties: true }
+                lineItemFilters: { type: object, additionalProperties: true }
+                postAllocationActions: { type: object, additionalProperties: true }
+                metricFilters: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Distributors]
+      operationId: deleteDistributor
+      summary: Delete a distributor
+      description: |
+        The first call marks the record `deleted` and returns it. A second call on a
+        deleted record removes it and answers 204.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /distributors/bulk:
+    post:
+      tags: [Distributors]
+      operationId: bulkDistributors
+      summary: Run a bulk action on distributors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, ids]
+              properties:
+                action: { type: string, enum: [activate, deactivate, restore, delete, permanent_delete] }
+                ids: { type: array, items: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /distributors/credit-metric:
+    post:
+      tags: [Distributors]
+      operationId: creditDistributorMetric
+      summary: Credit a manual metric to a collaborator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [collaboratorId]
+              properties:
+                collaboratorId: { type: integer }
+      responses:
+        '200':
+          description: Credited.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /currencies/custom:
+    get:
+      tags: [Custom Currencies]
+      operationId: listCustomCurrencies
+      summary: List custom currencies
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [code, name, symbol, symbolPosition, type, exchangeRate, dateCreated, dateModified] }
+        - name: type
+          in: query
+          schema: { type: string, enum: [internal, monetary] }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Custom Currencies]
+      operationId: createCustomCurrency
+      summary: Create a custom currency
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name, symbol, type]
+              properties:
+                code: { type: string, description: Upper case and unique. Real currency codes are refused. }
+                name: { type: string }
+                symbol: { type: string }
+                symbolPosition: { type: string, enum: [before, after] }
+                type: { type: string, enum: [internal, monetary] }
+                exchangeRate: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /currencies/custom/{code}:
+    put:
+      tags: [Custom Currencies]
+      operationId: updateCustomCurrency
+      summary: Update a custom currency
+      description: |
+        The type cannot change. Siren answers 400 when the body sends `type`.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string }, example: PTS }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                symbol: { type: string }
+                symbolPosition: { type: string, enum: [before, after] }
+                exchangeRate: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Custom Currencies]
+      operationId: deleteCustomCurrency
+      summary: Delete a custom currency
+      description: |
+        Sets every program that pays in the currency to `inactive`, deletes the
+        currency, and answers `{success, deactivatedPrograms}`. With
+        `wipeLedger` true, the ledger entries in the currency are deleted too.
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string }, example: PTS }
+        - name: wipeLedger
+          in: query
+          schema: { type: boolean }
+          description: Also delete the ledger entries that use the currency.
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /credits/adjust:
+    post:
+      tags: [Credits]
+      operationId: adjustCreditBalance
+      summary: Adjust a collaborator's credit balance
+      description: |
+        Read balances through the collaborator's `creditBalances` field. There is no
+        route that lists ledger entries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [collaboratorId, currency, amount]
+              properties:
+                collaboratorId: { type: integer }
+                currency: { type: string, description: An internal custom currency code. }
+                amount: { type: integer, description: Minor units. Negative takes credit away. Must not be zero. }
+                description: { type: string }
+      responses:
+        '200':
+          description: Adjusted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /collaborator-groups:
+    get:
+      tags: [Collaborator Groups]
+      operationId: listCollaboratorGroups
+      summary: List collaborator groups
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, name, description, structure, dateCreated, dateModified] }
+        - name: structure
+          in: query
+          schema: { type: string }
+        - { $ref: '#/components/parameters/Search' }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Collaborator Groups]
+      operationId: createCollaboratorGroup
+      summary: Create a collaborator group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, structure]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                structure: { type: string, example: flat }
+                members: { type: array, items: { $ref: '#/components/schemas/GroupMember' } }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /collaborator-groups/{id}:
+    get:
+      tags: [Collaborator Groups]
+      operationId: getCollaboratorGroup
+      summary: Get a collaborator group
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Fields' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Collaborator Groups]
+      operationId: updateCollaboratorGroup
+      summary: Update a collaborator group
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                structure: { type: string }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Collaborator Groups]
+      operationId: deleteCollaboratorGroup
+      summary: Delete a collaborator group
+      description: |
+        Deletes the group for good and answers 204.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /collaborator-groups/{id}/members:
+    get:
+      tags: [Collaborator Groups]
+      operationId: listCollaboratorGroupMembers
+      summary: List a group's members
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, groupId, collaboratorId, dateCreated, dateModified] }
+        - { $ref: '#/components/parameters/Id' }
+        - name: collaboratorId
+          in: query
+          schema: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Collaborator Groups]
+      operationId: addCollaboratorGroupMembers
+      summary: Add members to a group
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [members]
+              properties:
+                members: { type: array, items: { $ref: '#/components/schemas/GroupMember' } }
+      responses:
+        '200':
+          description: Added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    put:
+      tags: [Collaborator Groups]
+      operationId: setCollaboratorGroupMembers
+      summary: Replace a group's members
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [members]
+              properties:
+                members: { type: array, items: { $ref: '#/components/schemas/GroupMember' } }
+      responses:
+        '200':
+          description: Replaced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /collaborator-groups/{id}/members/{collaboratorId}:
+    delete:
+      tags: [Collaborator Groups]
+      operationId: removeCollaboratorGroupMember
+      summary: Remove a member from a group
+      description: |
+        Removes one collaborator from the group.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: collaboratorId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /collaborator-groups/structures:
+    get:
+      tags: [Collaborator Groups]
+      operationId: listCollaboratorGroupStructures
+      summary: List group structures
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /obligations:
     get:
       tags: [Reconciliation]
       operationId: listObligations
       summary: List obligations
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
       responses:
         '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /payouts:
     get:
@@ -293,10 +1689,13 @@ paths:
       operationId: listPayouts
       summary: List payouts
       parameters:
-        - { $ref: '#/components/parameters/Page' }
-        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
       responses:
         '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 components:
   securitySchemes:
@@ -305,20 +1704,91 @@ components:
       scheme: bearer
       bearerFormat: sk_live_...
       description: An API key minted in the Siren dashboard or via createApiKey.
+    connectorToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A connected site's OAuth access token, issued by `POST /oauth/token`
+        when an organization admin approves the site. It expires, and the
+        site renews it with its refresh token. Siren answers 401 when it has
+        expired.
   headers:
     XSirenOID:
       description: The opportunity (tracking) id associated with the event.
       schema: { type: integer }
   parameters:
-    Page:
-      name: page
+    Number:
+      name: number
       in: query
-      schema: { type: integer, minimum: 1, default: 1 }
-    PerPage:
-      name: perPage
+      description: |
+        Page size. Siren answers 400 outside 1 to 200. The PHP SDK also accepts
+        `perPage` and `page` and turns them into `number` and `offset`.
+      schema: { type: integer, minimum: 1, maximum: 200, default: 10 }
+    Offset:
+      name: offset
       in: query
-      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      description: The first row to return, counting from 0.
+      schema: { type: integer, minimum: 0, default: 0 }
+    Fields:
+      name: fields
+      in: query
+      description: Comma-separated fields to return. Each list has a default set.
+      schema: { type: string }
+      example: id,status,dateCreated
+    Order:
+      name: order
+      in: query
+      schema: { type: string, enum: [ASC, DESC] }
+    Search:
+      name: s
+      in: query
+      description: A search term matched against the resource's text columns.
+      schema: { type: string }
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
   schemas:
+    Record:
+      type: object
+      description: |
+        A Siren record. The fields present depend on the resource and on the
+        `fields` the request asked for.
+      additionalProperties: true
+    ListEnvelope:
+      type: object
+      required: [items, total, page, perPage, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Record' }
+        total: { type: integer, description: Records across all pages. }
+        page: { type: integer, description: 'floor(offset / number) + 1' }
+        perPage: { type: integer, description: The page size used. }
+        totalPages: { type: integer }
+    TransactionDetail:
+      type: object
+      required: [name, value]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        type: { type: string, example: credit }
+        value: { type: integer, description: Per-unit value in minor units. }
+        quantity: { type: integer, default: 1 }
+        units: { type: string, example: USD }
+        attributes: { type: object, additionalProperties: true }
+    GroupMember:
+      type: object
+      required: [collaboratorId]
+      properties:
+        collaboratorId: { type: integer, minimum: 1 }
+        metadata:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: string
     SalePayload:
       type: object
       required: [source, externalId, total, trackingId]
@@ -437,8 +1907,8 @@ components:
           type: array
           items: { type: string }
         createdAt: { type: string, format: date-time }
-        expiresAt: { type: string, format: date-time, nullable: true }
-        lastUsedAt: { type: string, format: date-time, nullable: true }
+        expiresAt: { type: [string, 'null'], format: date-time }
+        lastUsedAt: { type: [string, 'null'], format: date-time }
     ApiKeyCreate:
       type: object
       required: [label]
@@ -463,21 +1933,40 @@ components:
                 message: { type: string }
                 code: { type: string }
                 data: { type: object, additionalProperties: true }
+                context:
+                  type: object
+                  additionalProperties: true
+                  description: |
+                    Sent by the record routes. A failed validation carries
+                    `type: VALIDATION_FAILED` and `failedValidations`, a map
+                    of field name to messages.
   responses:
     PaginatedList:
       description: |
-        A bare JSON array of records. The estimated total count, when the
-        endpoint paginates, is returned in the `x-siren-estimated-count`
-        response header (not in the body).
+        One page of records in Siren's list envelope. The total also appears
+        in the `x-siren-estimated-count` response header.
       headers:
         x-siren-estimated-count:
           schema: { type: integer }
-          description: Estimated total number of records across all pages.
+          description: Total number of records across all pages.
       content:
         application/json:
-          schema:
-            type: array
-            items: { type: object, additionalProperties: true }
+          schema: { $ref: '#/components/schemas/ListEnvelope' }
+    Record:
+      description: A record, or the result of an action.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Record' }
+    BadRequest:
+      description: A query parameter is out of range, such as `number` above 200.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: The record would duplicate one that exists.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     Unauthorized:
       description: Missing or invalid API key.
       content:
@@ -494,7 +1983,9 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     ValidationError:
-      description: The request body failed validation.
+      description: |
+        The request body failed validation. The record routes answer 400 with
+        `error.context.failedValidations`.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

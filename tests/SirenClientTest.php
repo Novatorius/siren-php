@@ -110,4 +110,24 @@ final class SirenClientTest extends TestCase
         $this->assertInstanceOf(\Siren\Sdk\Resources\ListResource::class, $siren->obligations);
         $this->assertInstanceOf(\Siren\Sdk\Resources\ListResource::class, $siren->payouts);
     }
+
+    public function testExposesTheRecordResources(): void
+    {
+        $siren = $this->mockSiren([]);
+
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Collaborators::class, $siren->collaborators);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\CollaboratorAliases::class, $siren->collaborators->aliases);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\ProgramEnrollments::class, $siren->collaborators->enrollments);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Programs::class, $siren->programs);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\ProgramGroups::class, $siren->programGroups);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Opportunities::class, $siren->opportunities);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Transactions::class, $siren->transactions);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Conversions::class, $siren->conversions);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Engagements::class, $siren->engagements);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Distributors::class, $siren->distributors);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\CustomCurrencies::class, $siren->customCurrencies);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Credits::class, $siren->credits);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\CollaboratorGroups::class, $siren->collaboratorGroups);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\CollaboratorGroupMembers::class, $siren->collaboratorGroups->members);
+    }
 }

@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Siren\Sdk;
 
 /**
- * A page of records from a reconciliation reader, with paging metadata
- * where the API provides it.
+ * A page of records from a list endpoint, with paging metadata where the
+ * API provides it.
  *
  * @implements \IteratorAggregate<int, array<string, mixed>>
  */
@@ -20,6 +20,7 @@ final class ListResult implements \IteratorAggregate, \Countable
         private readonly ?int $page = null,
         private readonly ?int $perPage = null,
         private readonly ?int $total = null,
+        private readonly ?int $totalPages = null,
     ) {
     }
 
@@ -43,6 +44,22 @@ final class ListResult implements \IteratorAggregate, \Countable
     public function getTotal(): ?int
     {
         return $this->total;
+    }
+
+    /** Number of pages at this page size, when the API reports it. */
+    public function getTotalPages(): ?int
+    {
+        return $this->totalPages;
+    }
+
+    /** Whether a later page exists, judged from the reported total. Null when the total is unknown. */
+    public function hasMore(): ?bool
+    {
+        if ($this->total === null || $this->page === null || $this->perPage === null || $this->perPage < 1) {
+            return null;
+        }
+
+        return $this->page * $this->perPage < $this->total;
     }
 
     /** @return \ArrayIterator<int, array<string, mixed>> */
