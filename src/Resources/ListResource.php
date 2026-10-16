@@ -15,10 +15,11 @@ use Siren\Sdk\ListResult;
  * `list()` accepts the API's own paging parameters, `number` (page size,
  * 1 to 200, default 10) and `offset` (first row, default 0), or the
  * friendlier `page` and `perPage`, which are turned into `number` and
- * `offset` before the request goes out. Every other key is sent as a query
- * filter. A list value, such as `['active', 'pending']` or a `fields` list,
- * is sent comma-separated, which is how Siren reads both field lists and
- * "any of" filters.
+ * `offset` before the request goes out. A page size above 200 is lowered to
+ * 200, as Siren would. Every other key is sent as a query filter. A list
+ * value, such as `['active', 'pending']` or a `fields` list, is sent
+ * comma-separated, which is how Siren reads both field lists and "any of"
+ * filters.
  *
  * Siren wraps list responses as
  * `{"items": [...], "total", "page", "perPage", "totalPages"}`. A bare JSON
@@ -27,6 +28,9 @@ use Siren\Sdk\ListResult;
  */
 class ListResource
 {
+    /** The largest page Siren serves. A larger `number` is lowered to this. */
+    public const MAX_PAGE_SIZE = 200;
+
     public function __construct(
         protected readonly HttpTransport $transport,
         protected readonly string $path,
@@ -140,6 +144,12 @@ class ListResource
 
         if (is_numeric($perPage) && !isset($params['number'])) {
             $params['number'] = (int) $perPage;
+        }
+
+        // Siren lowers a page size above 200 to 200. Clamp it here too, or a
+        // page-based offset would skip the rows between the two sizes.
+        if (is_numeric($params['number'] ?? null) && (int) $params['number'] > self::MAX_PAGE_SIZE) {
+            $params['number'] = self::MAX_PAGE_SIZE;
         }
 
         if (is_numeric($page) && !isset($params['offset'])) {

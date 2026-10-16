@@ -16,7 +16,7 @@ final class HttpRequest
     /**
      * @param array<string, string> $headers Header name to value.
      * @param string|null           $body    Raw request body, or null for none.
-     * @param float                 $timeout Seconds to allow for the whole request.
+     * @param float                 $timeout Seconds to allow. Guzzle applies it to the whole request, PHP streams to each read.
      */
     public function __construct(
         private readonly string $method,

@@ -53,11 +53,12 @@ class Programs extends ListResource
     /**
      * Creates a program.
      *
-     * Required: `incentiveType`, `incentiveResolverType`, `units` (a currency
-     * code). Usual: `name`, `description`, `status` (see
-     * {@see \Siren\Sdk\ProgramStatus}), and `engagementTypes`, a map of
-     * engagement type to `{calculationType, calculationArgs}`. Plus-tier
-     * extras: `collaboratorIds` and `collaboratorGroupId`.
+     * Required: `name`, `description`, `status` (see
+     * {@see \Siren\Sdk\ProgramStatus}), `incentiveType`,
+     * `incentiveResolverType`, `units` (a currency code), and
+     * `engagementTypes`, a map of engagement type to
+     * `{calculationType, calculationArgs}`. Optional: `incentiveTypeArgs`.
+     * Plus-tier extras: `collaboratorIds` and `collaboratorGroupId`.
      *
      * @param array<string, mixed> $params
      *

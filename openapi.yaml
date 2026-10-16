@@ -16,8 +16,11 @@ info:
     engagements, distributors, custom currencies, store credit, and
     collaborator groups.
 
-    Requests authenticate with a bearer token: an organization API key
+    Requests authenticate with a bearer token. Event ingestion
+    (`POST /event/{eventSlug}`) accepts an organization API key
     (`Authorization: Bearer sk_live_...`) or a connected site's OAuth access
+    token. As of Siren 3.6, the other routes in this document accept only a
+    signed-in dashboard session and answer 401 to an API key or a connector
     token.
 
     Successful responses are bare JSON: an object for one record, and the
@@ -368,7 +371,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /collaborators/{id}:
     get:
       tags: [Collaborators]
@@ -414,7 +417,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
     delete:
       tags: [Collaborators]
       operationId: deleteCollaborator
@@ -452,7 +455,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Record' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /collaborators/status-types:
     get:
       tags: [Collaborators]
@@ -515,7 +518,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [incentiveType, incentiveResolverType, units]
+              required: [name, description, status, incentiveType, incentiveResolverType, units, engagementTypes]
               properties:
                 name: { type: string }
                 description: { type: string }
@@ -524,6 +527,7 @@ paths:
                 incentiveResolverType: { type: string }
                 units: { type: string, description: A currency code. }
                 engagementTypes: { type: object, additionalProperties: true, description: "Engagement type to {calculationType, calculationArgs}." }
+                incentiveTypeArgs: { type: object, additionalProperties: true }
                 collaboratorIds: { type: array, items: { type: integer } }
                 collaboratorGroupId: { type: integer }
       responses:
@@ -535,7 +539,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /programs/{id}:
     get:
       tags: [Programs]
@@ -577,7 +581,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
     delete:
       tags: [Programs]
       operationId: deleteProgram
@@ -610,7 +614,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Record' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /programs/status-types:
     get:
       tags: [Programs]
@@ -684,7 +688,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /program-groups/{id}:
     get:
       tags: [Program Groups]
@@ -723,7 +727,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
     delete:
       tags: [Program Groups]
       operationId: deleteProgramGroup
@@ -755,7 +759,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Record' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /opportunities:
     get:
       tags: [Opportunities]
@@ -818,7 +822,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /transactions:
     get:
       tags: [Transactions]
@@ -873,7 +877,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /transactions/{id}:
     get:
       tags: [Transactions]
@@ -910,7 +914,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Record' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /transactions/credit-collaborator:
     post:
       tags: [Transactions]
@@ -936,7 +940,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /transactions/sources:
     get:
       tags: [Transactions]
@@ -1017,7 +1021,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /conversions/{id}:
     get:
       tags: [Conversions]
@@ -1061,7 +1065,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
     delete:
       tags: [Conversions]
       operationId: deleteConversion
@@ -1094,7 +1098,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Record' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /conversions/types:
     get:
       tags: [Conversions]
@@ -1208,6 +1212,7 @@ paths:
           application/json:
             schema:
               type: object
+              required: [name, description, distributionResolver, distributionPoolResolver, status, units]
               properties:
                 name: { type: string }
                 description: { type: string }
@@ -1233,7 +1238,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /distributors/{id}:
     get:
       tags: [Distributors]
@@ -1287,7 +1292,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
     delete:
       tags: [Distributors]
       operationId: deleteDistributor
@@ -1320,7 +1325,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Record' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /distributors/credit-metric:
     post:
       tags: [Distributors]
@@ -1344,7 +1349,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /currencies/custom:
     get:
       tags: [Custom Currencies]
@@ -1392,12 +1397,14 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /currencies/custom/{code}:
     put:
       tags: [Custom Currencies]
       operationId: updateCustomCurrency
       summary: Update a custom currency
+      description: |
+        The type cannot change. Siren answers 400 when the body sends `type`.
       parameters:
         - { name: code, in: path, required: true, schema: { type: string }, example: PTS }
       requestBody:
@@ -1407,11 +1414,9 @@ paths:
             schema:
               type: object
               properties:
-                code: { type: string, description: Upper case and unique. Real currency codes are refused. }
                 name: { type: string }
                 symbol: { type: string }
                 symbolPosition: { type: string, enum: [before, after] }
-                type: { type: string, enum: [internal, monetary] }
                 exchangeRate: { type: integer, minimum: 1 }
       responses:
         '200':
@@ -1422,14 +1427,15 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
     delete:
       tags: [Custom Currencies]
       operationId: deleteCustomCurrency
       summary: Delete a custom currency
       description: |
-        Siren refuses while ledger entries use the currency, unless `wipeLedger`
-        is true.
+        Sets every program that pays in the currency to `inactive`, deletes the
+        currency, and answers `{success, deactivatedPrograms}`. With
+        `wipeLedger` true, the ledger entries in the currency are deleted too.
       parameters:
         - { name: code, in: path, required: true, schema: { type: string }, example: PTS }
         - name: wipeLedger
@@ -1438,7 +1444,6 @@ paths:
           description: Also delete the ledger entries that use the currency.
       responses:
         '200': { $ref: '#/components/responses/Record' }
-        '204': { description: Removed. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /credits/adjust:
@@ -1470,7 +1475,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /collaborator-groups:
     get:
       tags: [Collaborator Groups]
@@ -1517,7 +1522,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /collaborator-groups/{id}:
     get:
       tags: [Collaborator Groups]
@@ -1555,7 +1560,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
     delete:
       tags: [Collaborator Groups]
       operationId: deleteCollaboratorGroup
@@ -1614,7 +1619,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
     put:
       tags: [Collaborator Groups]
       operationId: setCollaboratorGroupMembers
@@ -1639,7 +1644,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/ValidationError' }
+        '400': { $ref: '#/components/responses/ValidationError' }
   /collaborator-groups/{id}/members/{collaboratorId}:
     delete:
       tags: [Collaborator Groups]
@@ -1928,6 +1933,13 @@ components:
                 message: { type: string }
                 code: { type: string }
                 data: { type: object, additionalProperties: true }
+                context:
+                  type: object
+                  additionalProperties: true
+                  description: |
+                    Sent by the record routes. A failed validation carries
+                    `type: VALIDATION_FAILED` and `failedValidations`, a map
+                    of field name to messages.
   responses:
     PaginatedList:
       description: |
@@ -1971,7 +1983,9 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     ValidationError:
-      description: The request body failed validation.
+      description: |
+        The request body failed validation. The record routes answer 400 with
+        `error.context.failedValidations`.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ProgramGroupSorter`, and `CustomCurrencyType`, plus a `BULK_*` constant for
   every bulk action.
 - `ListResult::getTotalPages()` and `ListResult::hasMore()`.
+- `BadRequestException::getFieldErrors()`. Siren's record routes answer a
+  failed validation with 400 and `error.context.failedValidations`, which the
+  SDK now reads, with `VALIDATION_FAILED` as the error code.
 
 ### Changed
 
@@ -56,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - List readers now read Siren's list envelope
   (`{items, total, page, perPage, totalPages}`). Before, `getData()`
   returned the envelope's values instead of the records.
+- A page size above 200 is lowered to 200 before a page-based offset is
+  worked out, as Siren lowers it, so no rows are skipped between pages.
 - `openapi.yaml` described list responses as bare arrays and every response
   as wrapped in `data`. It now describes the list envelope and bare record
   bodies, and uses OpenAPI 3.1 null types for the API key dates.

@@ -174,6 +174,14 @@ Webhook verification failures throw `SignatureVerificationException`.
 
 ## Records
 
+> **Credentials on record routes.** As of Siren 3.6, Siren Cloud accepts an
+> API key or a connected site's OAuth token only on event ingestion. The
+> record routes below, and the 0.1.0 reconciliation readers, accept a
+> signed-in dashboard session and answer 401 to an API key or a connector
+> token. The SDK's record resources follow the routes as Siren defines them
+> and start working for connectors once Cloud accepts their credentials
+> there.
+
 Every record resource follows the same shape: `list()`, `retrieve()`,
 `create()`, `update()`, `delete()`, and `bulk()`, where Siren has the route.
 A resource has no method for a route Siren lacks. Engagements, for example,

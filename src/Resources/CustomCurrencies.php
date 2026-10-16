@@ -47,7 +47,9 @@ class CustomCurrencies extends ListResource
     }
 
     /**
-     * Updates a custom currency with `PUT /currencies/custom/{code}`.
+     * Updates a custom currency with `PUT /currencies/custom/{code}`. Accepts
+     * `name`, `symbol`, `symbolPosition`, and `exchangeRate`. Siren refuses a
+     * change of `type` with a 400. Delete and recreate the currency instead.
      *
      * @param array<string, mixed> $params
      *
@@ -59,8 +61,9 @@ class CustomCurrencies extends ListResource
     }
 
     /**
-     * Deletes a custom currency. Siren refuses while ledger entries use it,
-     * unless `$wipeLedger` is true, which deletes those entries as well.
+     * Deletes a custom currency. Siren first sets every program that pays in
+     * it to `inactive`, then answers `{success, deactivatedPrograms}`. With
+     * `$wipeLedger` true, the ledger entries in the currency are deleted too.
      *
      * @return array<int|string, mixed>
      */

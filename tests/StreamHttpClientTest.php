@@ -37,12 +37,9 @@ final class StreamHttpClientTest extends TestCase
         fclose($socket);
         $port = (int) substr($address, strrpos($address, ':') + 1);
 
-        $command = sprintf(
-            '%s -S 127.0.0.1:%d %s',
-            escapeshellarg(PHP_BINARY),
-            $port,
-            escapeshellarg(__DIR__ . '/Support/echo-server.php'),
-        );
+        // An array command runs php directly, without a wrapping shell, so
+        // proc_terminate() stops the server itself and leaves nothing behind.
+        $command = [PHP_BINARY, '-S', '127.0.0.1:' . $port, __DIR__ . '/Support/echo-server.php'];
         $process = proc_open($command, [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']], $pipes);
 
         if (!is_resource($process)) {
@@ -107,12 +104,23 @@ final class StreamHttpClientTest extends TestCase
         $this->assertSame(['error' => 'status 422'], json_decode($response->getBody(), true));
     }
 
-    public function testFollowsARedirectAndReportsTheFinalResponse(): void
+    /**
+     * Following a redirect would resend the Authorization header to wherever
+     * the Location points, and PHP's stream wrapper turns a redirected POST
+     * into a GET without its body. Siren does not redirect API calls, so the
+     * client hands the 3xx back and the SDK reports it as an error.
+     */
+    public function testDoesNotFollowRedirects(): void
     {
-        $response = (new StreamHttpClient())->send(new HttpRequest('GET', self::$baseUrl . '/redirect'));
+        $response = (new StreamHttpClient())->send(new HttpRequest(
+            'POST',
+            self::$baseUrl . '/redirect',
+            ['Authorization' => 'Bearer t0k3n'],
+            '{"a":1}',
+        ));
 
-        $this->assertSame(200, $response->getStatusCode());
-        $this->assertSame('/siren/v1/echo', json_decode($response->getBody(), true)['path']);
+        $this->assertSame(302, $response->getStatusCode());
+        $this->assertSame('/siren/v1/echo', $response->getHeaderLine('location'));
     }
 
     public function testARefusedConnectionThrowsHttpClientException(): void

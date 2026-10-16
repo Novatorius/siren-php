@@ -38,6 +38,17 @@ final class ExceptionFactory
                 }
                 $code = is_string($error['code'] ?? null) ? $error['code'] : null;
                 $data = is_array($error['data'] ?? null) ? $error['data'] : null;
+
+                // Siren's REST layer sends `{"error": {"message", "context"}}`,
+                // and a failed validation puts `type: VALIDATION_FAILED` and
+                // the per-field messages in `context.failedValidations`.
+                if ($data === null && is_array($error['context'] ?? null) && $error['context'] !== []) {
+                    $data = $error['context'];
+                }
+
+                if ($code === null && is_array($data) && is_string($data['type'] ?? null)) {
+                    $code = $data['type'];
+                }
             }
         }
 

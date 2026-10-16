@@ -66,7 +66,8 @@ final class CollaboratorAliases
 
     /**
      * Gives the collaborator a new tracking code. Siren refuses a code that
-     * another collaborator holds with a 422.
+     * another collaborator holds with a 400, raised as
+     * {@see \Siren\Sdk\Exception\BadRequestException} with field errors.
      *
      * @return array<int|string, mixed> The updated collaborator.
      */

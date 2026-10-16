@@ -38,6 +38,18 @@ final class ReconciliationTest extends TestCase
         $this->assertSame(['number' => '200', 'offset' => '400'], $query);
     }
 
+    public function testAPageSizeAbove200IsClampedBeforeTheOffsetIsWorkedOut(): void
+    {
+        // Siren lowers number to 200. Without the clamp, page 2 of perPage 500
+        // would start at offset 500 and rows 200 to 499 would never come back.
+        $siren = $this->mockSiren([self::jsonResponse(200, [])]);
+
+        $siren->conversions->list(['page' => 2, 'perPage' => 500]);
+
+        parse_str($this->lastRequest()->getUri()->getQuery(), $query);
+        $this->assertSame(['number' => '200', 'offset' => '200'], $query);
+    }
+
     public function testListReadsSirensPaginatedEnvelope(): void
     {
         // Every Siren list route wraps its rows with ListResponseWrapperInterceptor.

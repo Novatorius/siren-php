@@ -11,6 +11,11 @@ namespace Siren\Sdk\Http;
  * The SDK uses it when no `httpClient` option is given and Guzzle is not
  * installed. HTTPS needs the `openssl` extension, which nearly every PHP
  * build includes.
+ *
+ * Two limits differ from Guzzle. Redirects are never followed: the 3xx
+ * response comes back as it is, because following it would resend the
+ * bearer token to another host. And the timeout bounds each read from the
+ * socket, not the whole request.
  */
 final class StreamHttpClient implements HttpClient
 {
@@ -28,6 +33,9 @@ final class StreamHttpClient implements HttpClient
             'timeout' => $request->getTimeout(),
             'ignore_errors' => true,
             'protocol_version' => 1.1,
+            // A followed redirect would resend Authorization to the new host,
+            // and the wrapper turns a redirected POST into a bodiless GET.
+            'follow_location' => 0,
         ];
 
         if ($request->getBody() !== null) {
@@ -79,9 +87,8 @@ final class StreamHttpClient implements HttpClient
     }
 
     /**
-     * Reads the last response's status and headers. After a redirect the
-     * stream wrapper reports every hop in order, so only the final block
-     * counts.
+     * Reads the response's status and headers. If the wrapper ever reports
+     * more than one status block, only the last one counts.
      *
      * @param list<string> $lines
      *

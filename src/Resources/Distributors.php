@@ -50,9 +50,9 @@ class Distributors extends ListResource
     /**
      * Creates a distributor.
      *
-     * Fields: `name`, `description`, `distributionResolver`,
-     * `distributionPoolResolver`, `status`, `units`, `revenuePercentage`,
-     * `schedule` (a list of date modifiers such as
+     * Required: `name`, `description`, `distributionResolver`,
+     * `distributionPoolResolver`, `status`, and `units`. Optional:
+     * `revenuePercentage`, `schedule` (a list of date modifiers such as
      * `first day of next month`), `engagementTypes`, `collaboratorIds`,
      * `collaboratorGroupId`, `transactionCompilers`, `lineItemFilters`,
      * `postAllocationActions`, and `metricFilters`.
