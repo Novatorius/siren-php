@@ -19,9 +19,11 @@ use Siren\Sdk\Resources\Distributors;
 use Siren\Sdk\Resources\Engagements;
 use Siren\Sdk\Resources\Events;
 use Siren\Sdk\Resources\ListResource;
+use Siren\Sdk\Resources\Mappings;
 use Siren\Sdk\Resources\Opportunities;
 use Siren\Sdk\Resources\ProgramGroups;
 use Siren\Sdk\Resources\Programs;
+use Siren\Sdk\Resources\Settings;
 use Siren\Sdk\Resources\Transactions;
 use Siren\Sdk\Resources\Webhooks;
 
@@ -103,8 +105,14 @@ class Siren
     /** Custom currencies, keyed by code. */
     public readonly CustomCurrencies $customCurrencies;
 
-    /** Store credit adjustments and balances. */
+    /** Store credit: balances, ledger entries, holds, and adjustments. */
     public readonly Credits $credits;
+
+    /** Links between collaborators and records outside Siren, such as WordPress users and products. */
+    public readonly Mappings $mappings;
+
+    /** The organization settings Siren shares with a connected site. */
+    public readonly Settings $settings;
 
     /** Collaborator groups and their members (`->members`). */
     public readonly CollaboratorGroups $collaboratorGroups;
@@ -152,6 +160,8 @@ class Siren
         $this->distributors = new Distributors($transport);
         $this->customCurrencies = new CustomCurrencies($transport);
         $this->credits = new Credits($transport);
+        $this->mappings = new Mappings($transport);
+        $this->settings = new Settings($transport);
         $this->collaboratorGroups = new CollaboratorGroups($transport);
     }
 

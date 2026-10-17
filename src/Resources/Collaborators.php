@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Siren\Sdk\Resources;
 
+use Siren\Sdk\CollaboratorStatus;
 use Siren\Sdk\HttpTransport;
 use Siren\Sdk\ListResult;
 
@@ -26,6 +27,12 @@ class Collaborators extends ListResource
     public const BULK_ADD_TO_DISTRIBUTOR = 'addToDistributor';
     public const BULK_REMOVE_FROM_DISTRIBUTOR = 'removeFromDistributor';
     public const BULK_SEND_SIGNUP_EMAIL = 'sendSignupEmail';
+
+    /**
+     * The fields that bind a collaborator to programs, distributors and
+     * groups. Siren treats a list that is present as the whole new set.
+     */
+    public const BINDING_FIELDS = ['programs', 'distributors', 'groups'];
 
     /** A collaborator's tracking codes. */
     public readonly CollaboratorAliases $aliases;
@@ -92,6 +99,50 @@ class Collaborators extends ListResource
     }
 
     /**
+     * Creates a collaborator the way a connected site must: as `pending`, so
+     * the organization approves them, and with no `programs`,
+     * `distributors` or `groups`. Siren refuses those fields from a
+     * connected site whatever their value, an empty list included, because
+     * the binding listeners read a list that is present as the whole new set.
+     * Enroll the collaborator afterwards with
+     * {@see ProgramEnrollments::add()}.
+     *
+     * Required: `fullName`, `nickname` and `email`. Optional: `trackingId`.
+     *
+     * @param array<string, mixed> $params
+     *
+     * @return array<int|string, mixed> The created collaborator.
+     */
+    public function createPending(array $params): array
+    {
+        self::refuse($params, self::BINDING_FIELDS, 'a connected site may not send it, so enroll through $siren->collaborators->enrollments->add()');
+        self::refuse($params, ['status'], 'createPending() always creates the collaborator as pending');
+
+        return $this->create(['status' => CollaboratorStatus::PENDING] + $params);
+    }
+
+    /**
+     * Updates a collaborator the way a connected site must: without
+     * `status`, `email`, `programs`, `distributors` or `groups`. Siren refuses
+     * a status or email change from a connected site, because Cloud claims
+     * accounts by email and approval stays with the organization, and it
+     * refuses the binding lists for the reason {@see createPending()} gives.
+     *
+     * Accepts `fullName`, `nickname` and `trackingId`.
+     *
+     * @param array<string, mixed> $params
+     *
+     * @return array<int|string, mixed> The updated collaborator.
+     */
+    public function updateDetails(int $id, array $params): array
+    {
+        self::refuse($params, self::BINDING_FIELDS, 'a connected site may not send it, so enroll through $siren->collaborators->enrollments->add()');
+        self::refuse($params, ['status', 'email'], 'a connected site may not change it');
+
+        return $this->update($id, $params);
+    }
+
+    /**
      * Updates a collaborator with `PUT /collaborators/{id}`. Send only the
      * fields to change: `fullName`, `nickname`, `email`, `status`,
      * `trackingId`, or the full replacement lists `programs`,
@@ -132,6 +183,19 @@ class Collaborators extends ListResource
     public function bulk(string $action, array $ids, array $extra = []): array
     {
         return $this->bulkAction($action, $ids, $extra);
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @param list<string>         $fields
+     */
+    private static function refuse(array $params, array $fields, string $why): void
+    {
+        foreach ($fields as $field) {
+            if (array_key_exists($field, $params)) {
+                throw new \InvalidArgumentException(sprintf('Leave out "%s": %s.', $field, $why));
+            }
+        }
     }
 
     /**

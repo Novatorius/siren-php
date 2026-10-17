@@ -61,8 +61,15 @@ final class ExceptionFactory
 
         $class = match ($status) {
             400 => BadRequestException::class,
-            401 => AuthenticationException::class,
-            403 => PermissionException::class,
+            401 => SiteDisconnectedException::matches($message) ? SiteDisconnectedException::class : AuthenticationException::class,
+            // A missing scope, which reconnecting fixes, or a policy refusal,
+            // which it does not. Any other 403, such as a plan entitlement,
+            // stays a plain PermissionException.
+            403 => match (true) {
+                MissingScopeException::matches($message) => MissingScopeException::class,
+                PolicyException::matches($message, $data) => PolicyException::class,
+                default => PermissionException::class,
+            },
             404 => NotFoundException::class,
             409 => ConflictException::class,
             422 => ValidationException::class,
