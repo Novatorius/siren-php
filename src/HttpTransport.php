@@ -27,7 +27,7 @@ use Siren\Sdk\Http\HttpResponse;
  */
 final class HttpTransport
 {
-    public const SDK_VERSION = '0.1.0';
+    public const SDK_VERSION = '0.2.0';
 
     private string $baseUrl;
     /** @var callable(float): void */

@@ -43,7 +43,7 @@ final class TransportSeamTest extends TestCase
         $this->assertSame('Bearer ' . self::API_KEY, $request->getHeader('Authorization'));
         $this->assertSame('application/json', $request->getHeader('Content-Type'));
         $this->assertSame('application/json', $request->getHeader('Accept'));
-        $this->assertSame('siren-php-sdk/0.1.0', $request->getHeader('User-Agent'));
+        $this->assertSame('siren-php-sdk/0.2.0', $request->getHeader('User-Agent'));
         $this->assertSame(12.0, $request->getTimeout());
         $this->assertSame(
             ['source' => 'woocommerce', 'externalId' => '1001', 'total' => 19.5, 'trackingId' => 31],

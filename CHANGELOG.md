@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-17
+
 ### Added
 
 - Typed taxonomy exports so integrations use SDK constants instead of magic
@@ -123,5 +125,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retries with exponential backoff on idempotent operations.
 - Typed exception hierarchy under `Siren\Sdk\Exception`.
 
-[Unreleased]: https://github.com/Novatorius/siren-php/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/Novatorius/siren-php/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/Novatorius/siren-php/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Novatorius/siren-php/releases/tag/0.1.0
