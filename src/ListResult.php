@@ -62,6 +62,23 @@ final class ListResult implements \IteratorAggregate, \Countable
         return $this->page * $this->perPage < $this->total;
     }
 
+    /**
+     * A copy of this page with each record passed through `$transform`, and
+     * the same paging metadata.
+     *
+     * @param callable(array<string, mixed>): array<string, mixed> $transform
+     */
+    public function map(callable $transform): self
+    {
+        return new self(
+            array_values(array_map($transform, $this->data)),
+            $this->page,
+            $this->perPage,
+            $this->total,
+            $this->totalPages,
+        );
+    }
+
     /** @return \ArrayIterator<int, array<string, mixed>> */
     public function getIterator(): \ArrayIterator
     {

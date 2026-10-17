@@ -20,8 +20,8 @@ class CustomCurrencies extends ListResource
     }
 
     /**
-     * Lists custom currencies. Filter: `type` (see
-     * {@see \Siren\Sdk\CustomCurrencyType}). Sort with `orderBy` (`code`,
+     * Lists custom currencies. Filters: `type` (see
+     * {@see \Siren\Sdk\CustomCurrencyType}) and `code`. Sort with `orderBy` (`code`,
      * `name`, `symbol`, `symbolPosition`, `type`, `exchangeRate`,
      * `dateCreated`, `dateModified`) and `order`.
      *
@@ -30,6 +30,26 @@ class CustomCurrencies extends ListResource
     public function list(array $params = []): ListResult
     {
         return parent::list($params);
+    }
+
+    /**
+     * Reads one custom currency by its code, or null when there is none.
+     * Uses the list's `code` filter, which a connected site's token may
+     * read, because Siren has no read route by code.
+     *
+     * @param array<string, mixed> $params Other list parameters, such as `fields`.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function retrieve(string $code, array $params = []): ?array
+    {
+        if ($code === '') {
+            throw new \InvalidArgumentException('A currency code is required.');
+        }
+
+        $records = $this->list(['code' => $code, 'number' => 1] + $params)->getData();
+
+        return $records[0] ?? null;
     }
 
     /**

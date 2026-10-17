@@ -19,9 +19,16 @@ info:
     Requests authenticate with a bearer token. Event ingestion
     (`POST /event/{eventSlug}`) accepts an organization API key
     (`Authorization: Bearer sk_live_...`) or a connected site's OAuth access
-    token. As of Siren 3.6, the other routes in this document accept only a
-    signed-in dashboard session and answer 401 to an API key or a connector
-    token.
+    token. The record routes accept a signed-in dashboard session, and a
+    connected site's token on the routes Siren Cloud opens to connectors,
+    when the token holds `connect:records:read` for reads or
+    `connect:records:write` for writes. Those are explicit scopes, so
+    `connect:*` does not grant them. A site writes only collaborators (as
+    `pending`, without program, distributor or group lists, and never a
+    status or email on update), codes, enrollments, collaborator mappings and
+    credit holds. A 403 that names a scope means the site must reconnect.
+    Any other 403 is a policy refusal. A 401 saying the site is no longer
+    connected means it was revoked.
 
     Successful responses are bare JSON: an object for one record, and the
     list envelope `{ "items", "total", "page", "perPage", "totalPages" }`
@@ -55,10 +62,10 @@ tags:
     description: Read Siren's ledger to reconcile against your own records.
   - name: Collaborators
     description: |
-      Affiliates and partners. Tracking codes are read through the `aliases`
-      and `referralCode` fields and set through `trackingId`. Program
-      enrollments are read through the `programs` field or the `programId`
-      filter, and written through the bulk actions or `programs` on update.
+      Affiliates and partners. Tracking and coupon codes live on
+      `/collaborator-aliases` and program enrollments on
+      `/collaborator-programs`. The collaborator record also carries them in
+      its `aliases`, `referralCode` and `programs` fields.
   - name: Programs
     description: Incentive rules that turn engagements into rewards.
   - name: Program Groups
@@ -76,7 +83,11 @@ tags:
   - name: Custom Currencies
     description: Points, store credit, and other organization-defined units, keyed by code.
   - name: Credits
-    description: Store credit adjustments.
+    description: Store credit balances, ledger entries, checkout holds, and adjustments.
+  - name: Mappings
+    description: Links between collaborators and records outside Siren, such as WordPress users and products.
+  - name: Settings
+    description: The organization settings Siren shares with a connected site.
   - name: Collaborator Groups
     description: Named sets of collaborators that programs and distributors target.
 paths:
@@ -1366,10 +1377,16 @@ paths:
         - name: type
           in: query
           schema: { type: string, enum: [internal, monetary] }
+        - name: code
+          in: query
+          schema: { type: string }
+          description: One currency by its code. The PHP SDK's `retrieve()` uses it.
+          example: STORE_CREDIT
       responses:
         '200': { $ref: '#/components/responses/PaginatedList' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Custom Currencies]
       operationId: createCustomCurrency
@@ -1452,8 +1469,8 @@ paths:
       operationId: adjustCreditBalance
       summary: Adjust a collaborator's credit balance
       description: |
-        Read balances through the collaborator's `creditBalances` field. There is no
-        route that lists ledger entries.
+        Only a dashboard session may adjust a balance. Read balances with
+        `GET /credit-balances` and the ledger with `GET /credit-entries`.
       requestBody:
         required: true
         content:
@@ -1476,6 +1493,362 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '400': { $ref: '#/components/responses/ValidationError' }
+  /credit-balances:
+    get:
+      tags: [Credits]
+      operationId: getCreditBalances
+      summary: Read a collaborator's store credit for a checkout
+      description: |
+        One row per internal currency. `balance` is the ledger sum, `reserved`
+        the live holds, and `available` the balance less reserved, never below
+        zero, all in minor units. Pass the checkout's own hold reference as
+        `excludeReference` so its hold does not count against itself. A
+        connected site sends the plain reference and Cloud adds its Property.
+      parameters:
+        - { name: collaboratorId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: currency, in: query, schema: { type: string, maxLength: 50 }, description: Just this internal currency. }
+        - name: excludeReference
+          in: query
+          schema: { $ref: '#/components/schemas/HoldReference' }
+      responses:
+        '200':
+          description: The balances.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CreditBalance' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /credit-entries:
+    get:
+      tags: [Credits]
+      operationId: listCreditEntries
+      summary: List store credit ledger entries
+      description: |
+        A query must name `collaboratorId` or `idempotencyKey`, so it never
+        lists a whole organization's ledger. Every filter is an exact match.
+        Only Siren writes the ledger.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Order' }
+        - { name: orderBy, in: query, schema: { type: string, enum: [id, dateCreated, amount], default: id } }
+        - { name: collaboratorId, in: query, schema: { type: integer } }
+        - { name: currency, in: query, schema: { type: string } }
+        - { name: sourceType, in: query, schema: { type: string } }
+        - { name: sourceId, in: query, schema: { type: string } }
+        - { name: description, in: query, schema: { type: string } }
+        - { name: idempotencyKey, in: query, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /credit-holds:
+    get:
+      tags: [Credits]
+      operationId: listCreditHolds
+      summary: List store credit holds
+      description: |
+        A query must name `collaboratorId`, `reference` or `idempotencyKey`.
+        Every filter is an exact match. A connected site reads only the holds
+        its own checkouts placed, and their references come back with its
+        Property, as in `hold:woocommerce@property:5:{token}`.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Order' }
+        - { name: orderBy, in: query, schema: { type: string, enum: [id, dateCreated, expiresAt], default: id } }
+        - { name: collaboratorId, in: query, schema: { type: integer } }
+        - { name: currency, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [active, settled, released, expired] } }
+        - { name: reference, in: query, schema: { $ref: '#/components/schemas/HoldReference' } }
+        - { name: idempotencyKey, in: query, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    post:
+      tags: [Credits]
+      operationId: placeCreditHold
+      summary: Reserve store credit for a checkout
+      description: |
+        Placing again for the same token and currency replaces that session's
+        hold. The hold's `amount` may be lower than asked, because Siren caps
+        it at the credit available outside this session's own hold. A hold
+        lapses at its `ttl`, and Siren settles it when the order's redemption
+        arrives as an event. No route releases a hold.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [collaboratorId, currency, amount, token, platformId]
+              properties:
+                collaboratorId: { type: integer, minimum: 1 }
+                currency: { type: string, description: An internal custom currency code. }
+                amount: { type: integer, minimum: 1, description: Minor units. }
+                token: { $ref: '#/components/schemas/SiteName', description: 'The checkout session, at most 120 characters.' }
+                platformId: { $ref: '#/components/schemas/SiteName', description: 'The commerce platform, such as woocommerce, at most 60 characters. Plain. Cloud adds the Property.' }
+                ttl: { type: integer, minimum: 60, maximum: 3600, default: 1800 }
+      responses:
+        '201':
+          description: Placed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditHold' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            No credit is available in that currency, or another site's
+            checkout already holds credit for this collaborator and currency
+            under the same token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: |
+            The collaborator already holds credit for ten other live checkouts
+            on this site (no `Retry-After`), or the site spent its request
+            budget (with `Retry-After`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /collaborator-aliases:
+    get:
+      tags: [Collaborators]
+      operationId: listCollaboratorAliases
+      summary: Find tracking and coupon codes
+      description: |
+        Every filter is an exact match, and `type` matches the plain type in
+        every namespace, so `coupon` also finds a site's `coupon@property:5`.
+        Newest first. `?code=SAVE10&type=coupon&number=1` answers "who holds
+        this coupon". A connected site sends one plain type.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { name: order, in: query, schema: { type: string, enum: [ASC, DESC], default: DESC } }
+        - { name: orderBy, in: query, schema: { type: string, enum: [dateIssued, code, type, collaboratorId], default: dateIssued } }
+        - { name: code, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/SiteName' }, example: coupon }
+        - { name: collaboratorId, in: query, schema: { type: integer } }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    post:
+      tags: [Collaborators]
+      operationId: createCollaboratorAlias
+      summary: Give a collaborator a code
+      description: |
+        A code has one holder per type across every namespace. Cloud files a
+        connected site's code under the site's Property.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, type, collaboratorId]
+              properties:
+                code: { type: string }
+                type: { $ref: '#/components/schemas/SiteName' }
+                collaboratorId: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alias' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Someone already holds the code under this type, in any namespace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Collaborators]
+      operationId: freeCollaboratorAlias
+      summary: Free one code of one type
+      description: |
+        A connected site frees only codes in its own namespace. Freeing a code
+        nobody holds answers 200 too.
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: type, in: query, required: true, schema: { $ref: '#/components/schemas/SiteName' } }
+      responses:
+        '200': { $ref: '#/components/responses/Deleted' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /collaborator-programs:
+    get:
+      tags: [Collaborators]
+      operationId: listCollaboratorPrograms
+      summary: List program enrollments
+      description: One row `{collaboratorId, programId}` per enrollment. A comma-separated value matches any of its values.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Order' }
+        - { name: orderBy, in: query, schema: { type: string, enum: [collaboratorId, programId], default: collaboratorId } }
+        - { name: collaboratorId, in: query, schema: { type: string }, example: '4' }
+        - { name: programId, in: query, schema: { type: string }, example: '2,3' }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    post:
+      tags: [Collaborators]
+      operationId: addCollaboratorToProgram
+      summary: Enroll a collaborator in a program
+      description: |
+        Enrolling someone already enrolled changes nothing and still answers
+        201. A connected site may only name a program that runs on its own
+        Property.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [collaboratorId, programId]
+              properties:
+                collaboratorId: { type: integer, minimum: 1 }
+                programId: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Enrolled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Collaborators]
+      operationId: removeCollaboratorFromProgram
+      summary: End one enrollment
+      description: Removing an enrollment that does not exist answers 200 too. A connected site may only name a program that runs on its own Property.
+      parameters:
+        - { name: collaboratorId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: programId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { $ref: '#/components/responses/Deleted' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /mappings:
+    get:
+      tags: [Mappings]
+      operationId: listMappings
+      summary: Find links to records outside Siren
+      description: |
+        A query must name a type. A connected site must name `externalType`,
+        reads only its own namespace, and may never use the `user` type.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Order' }
+        - { name: orderBy, in: query, schema: { type: string, enum: [localId, externalId, localType, externalType], default: localId } }
+        - { name: localId, in: query, schema: { type: integer } }
+        - { name: localType, in: query, schema: { $ref: '#/components/schemas/SiteName' }, example: collaborator }
+        - { name: externalId, in: query, schema: { type: string } }
+        - { name: externalType, in: query, schema: { $ref: '#/components/schemas/SiteName' }, example: wordpress_user }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    post:
+      tags: [Mappings]
+      operationId: createMapping
+      summary: Link a collaborator to an outside record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [localId, localType, externalId, externalType]
+              properties:
+                localId: { type: integer, minimum: 1, description: A collaborator id. }
+                localType: { type: string, enum: [collaborator] }
+                externalId: { type: string }
+                externalType: { $ref: '#/components/schemas/SiteName' }
+      responses:
+        '201':
+          description: Linked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mapping' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Mappings]
+      operationId: deleteMappings
+      summary: Remove collaborator links
+      description: |
+        Send `localId`, or `externalId` with its `externalType`. A connected
+        site always sends `externalType`.
+      parameters:
+        - { name: localType, in: query, required: true, schema: { type: string, enum: [collaborator] } }
+        - { name: localId, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: externalId, in: query, schema: { type: string } }
+        - { name: externalType, in: query, schema: { $ref: '#/components/schemas/SiteName' } }
+      responses:
+        '200': { $ref: '#/components/responses/Deleted' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /configs:
+    get:
+      tags: [Settings]
+      operationId: listSharedConfigs
+      summary: Read the settings shared with a connected site
+      description: |
+        Only named settings leave Cloud. Today that is `collaborator` /
+        `urlReference` / `key`, the referral link's query parameter.
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Order' }
+        - { name: orderBy, in: query, schema: { type: string, enum: [type, subtype, configKey], default: type } }
+        - { name: type, in: query, required: true, schema: { type: string, enum: [collaborator] } }
+        - { name: subtype, in: query, schema: { type: string }, example: urlReference }
+        - { name: configKey, in: query, schema: { type: string }, example: key }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /collaborator-groups:
     get:
       tags: [Collaborator Groups]
@@ -1712,7 +2085,11 @@ components:
         A connected site's OAuth access token, issued by `POST /oauth/token`
         when an organization admin approves the site. It expires, and the
         site renews it with its refresh token. Siren answers 401 when it has
-        expired.
+        expired, or when the site was revoked. A site asks for
+        `connect:* connect:webhooks connect:records:read connect:records:write`.
+        Cloud files the types, platforms and tokens a site writes under the
+        site's Property (`coupon@property:5`) and takes the Property from the
+        token.
   headers:
     XSirenOID:
       description: The opportunity (tracking) id associated with the event.
@@ -1768,6 +2145,57 @@ components:
         page: { type: integer, description: 'floor(offset / number) + 1' }
         perPage: { type: integer, description: The page size used. }
         totalPages: { type: integer }
+    SiteName:
+      type: string
+      pattern: '^[A-Za-z0-9_-]+$'
+      description: |
+        A plain type, platform or token: letters, digits, underscores and
+        hyphens. Cloud refuses an `@` qualifier or a comma from a connected
+        site, and adds the site's Property itself.
+    HoldReference:
+      type: string
+      pattern: '^hold:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$'
+      description: A checkout session's hold reference, `hold:{platform}:{token}`, as a site sends it.
+      example: hold:woocommerce:0b6f3c2e-8a1d-4c55-9a0e-0d6c1b7f4e21
+    Alias:
+      type: object
+      properties:
+        code: { type: string, example: SAVE10 }
+        type: { type: string, description: 'Qualified for a connected site, as in coupon@property:5. The PHP SDK returns the plain type and the Property in propertyId.' }
+        collaboratorId: { type: integer }
+        dateIssued: { type: string }
+    Enrollment:
+      type: object
+      properties:
+        collaboratorId: { type: integer }
+        programId: { type: integer }
+    Mapping:
+      type: object
+      properties:
+        localId: { type: integer }
+        localType: { type: string, example: collaborator }
+        externalId: { type: string }
+        externalType: { type: string, description: 'Qualified for a connected site, as in wordpress_user@property:5. The PHP SDK returns the plain type and the Property in propertyId.' }
+    CreditBalance:
+      type: object
+      properties:
+        collaboratorId: { type: integer }
+        currency: { type: string }
+        balance: { type: integer }
+        reserved: { type: integer }
+        available: { type: integer }
+    CreditHold:
+      type: object
+      properties:
+        id: { type: integer }
+        collaboratorId: { type: integer }
+        currency: { type: string }
+        amount: { type: integer }
+        status: { type: string, enum: [active, settled, released, expired] }
+        reference: { type: string, example: 'hold:woocommerce@property:5:0b6f3c2e-8a1d-4c55-9a0e-0d6c1b7f4e21' }
+        idempotencyKey: { type: [string, 'null'] }
+        expiresAt: { type: string }
+        createdDate: { type: string }
     TransactionDetail:
       type: object
       required: [name, value]
@@ -1957,6 +2385,14 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Record' }
+    Deleted:
+      description: Removed, or nothing matched.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              deleted: { type: boolean, const: true }
     BadRequest:
       description: A query parameter is out of range, such as `number` above 200.
       content:
@@ -1973,7 +2409,12 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Forbidden:
-      description: The API key lacks the required scope.
+      description: |
+        The credential may not do this. For a connected site, a message
+        naming a scope (`This token is not authorized for
+        connect:records:read.`) means the site must reconnect. Any other 403
+        is a policy refusal, and `error.context.param` names the refused
+        field when there is one.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

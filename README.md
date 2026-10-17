@@ -20,7 +20,7 @@ This SDK is the official PHP client for the Siren API. It lets you:
 - Verify signed webhooks in a single, constant-time call
 - Manage API keys and webhook subscriptions
 - Reconcile Siren's ledger (conversions, transactions, obligations, payouts) against your own
-- Read and write the records a connector needs: collaborators and their tracking codes and program enrollments, programs, program groups, opportunities, transactions, conversions, engagements, distributors, custom currencies, store credit, and collaborator groups
+- Read and write the records a connector needs: collaborators and their tracking codes and program enrollments, mappings, programs, program groups, opportunities, transactions, conversions, engagements, distributors, custom currencies, store credit and its holds, shared settings, and collaborator groups
 - Run inside any host: bring your own HTTP client and your own OAuth access token
 
 The full API surface is described in the [OpenAPI spec](./openapi.yaml).
@@ -126,7 +126,7 @@ $secret = $subscription['signingSecret'];
 - **Subscription management** — create, list, and delete webhook subscriptions.
 - **API key management** — create, list, and revoke keys.
 - **Reconciliation readers** — paginated iterators over conversions, transactions, obligations, and payouts.
-- **Record resources**: collaborators (with tracking codes and program enrollments), programs, program groups, opportunities, transactions and their details, conversions, engagements, distributors, custom currencies, store credit, and collaborator groups. See [Records](#records).
+- **Record resources**: collaborators (with tracking codes and program enrollments), mappings, settings, programs, program groups, opportunities, transactions and their details, conversions, engagements, distributors, custom currencies, store credit, and collaborator groups. See [Records](#records).
 - **Host-supplied HTTP and tokens**: plug in your platform's HTTP client and an OAuth access token that refreshes after a 401. See [Connecting a host](#connecting-a-host).
 - **Automatic retries** — network errors, 429s, and 5xx are retried with exponential backoff on idempotent operations; management writes are never auto-retried.
 - **Typed exceptions** — every error extends `Siren\Sdk\Exception\SirenException` and carries the status code, error code, and error data.
@@ -161,12 +161,12 @@ Every exception extends `Siren\Sdk\Exception\SirenException` and carries
 | Status          | Exception                                  |
 |-----------------|--------------------------------------------|
 | 400             | `BadRequestException`                      |
-| 401             | `AuthenticationException`                  |
-| 403             | `PermissionException`                      |
+| 401             | `AuthenticationException`, or `SiteDisconnectedException` when Siren says the site is no longer connected |
+| 403             | `PermissionException`, or its subclasses `MissingScopeException` (`getRequiredScope()`) and `PolicyException` (`getParam()`) |
 | 404             | `NotFoundException`                        |
-| 409             | `ConflictException`                        |
-| 422             | `ValidationException` — `getFieldErrors()` |
-| 429             | `RateLimitException` — `getRetryAfter()`   |
+| 409             | `ConflictException`, or `CodeConflictException` and `HoldConflictException` (`getReason()`) from the calls that raise them |
+| 422             | `ValidationException`, `getFieldErrors()`  |
+| 429             | `RateLimitException` with `getRetryAfter()`, or `HoldLimitException` from `placeHold()` |
 | 5xx / other     | `ApiException`                             |
 | network/timeout | `ConnectionException`                      |
 
@@ -174,13 +174,10 @@ Webhook verification failures throw `SignatureVerificationException`.
 
 ## Records
 
-> **Credentials on record routes.** As of Siren 3.6, Siren Cloud accepts an
-> API key or a connected site's OAuth token only on event ingestion. The
-> record routes below, and the 0.1.0 reconciliation readers, accept a
-> signed-in dashboard session and answer 401 to an API key or a connector
-> token. The SDK's record resources follow the routes as Siren defines them
-> and start working for connectors once Cloud accepts their credentials
-> there.
+> **Credentials on record routes.** The record routes accept a signed-in
+> dashboard session, and a connected site's OAuth token reaches the routes
+> Siren Cloud opens to connectors once the site holds the record scopes. See
+> [Connected sites](#connected-sites).
 
 Every record resource follows the same shape: `list()`, `retrieve()`,
 `create()`, `update()`, `delete()`, and `bulk()`, where Siren has the route.
@@ -233,9 +230,9 @@ automatically.
 
 | Resource | Routes |
 |----------|--------|
-| `$siren->collaborators` | list, retrieve, create, update, delete, bulk, `statusTypes`, `generateReferralCode` |
-| `$siren->collaborators->aliases` | `list`, `trackingCode`, `setTrackingCode` |
-| `$siren->collaborators->enrollments` | `programsFor`, `collaboratorsIn`, `enroll`, `unenroll`, `replace` |
+| `$siren->collaborators` | list, retrieve, create, update, delete, bulk, `createPending`, `updateDetails`, `statusTypes`, `generateReferralCode` |
+| `$siren->collaborators->aliases` | `findByCode`, `forCollaborator`, `query`, `create`, `free`, `list`, `trackingCode`, `setTrackingCode` |
+| `$siren->collaborators->enrollments` | `list`, `add`, `remove`, `programsFor`, `collaboratorsIn`, `enroll`, `unenroll`, `replace` |
 | `$siren->programs` | list, retrieve, create, update, delete, bulk, `statusTypes`, `incentiveTypes`, `currencyTypes` |
 | `$siren->programGroups` | list, retrieve, create, update, delete, bulk |
 | `$siren->opportunities` | list, retrieve, update |
@@ -243,26 +240,32 @@ automatically.
 | `$siren->conversions` | list, retrieve, create, update, delete, bulk, `types` |
 | `$siren->engagements` | list, retrieve, `types`, `calculations` |
 | `$siren->distributors` | list, retrieve, create, update, delete, bulk, `creditMetric` |
-| `$siren->customCurrencies` | list, create, update, delete (keyed by currency code) |
-| `$siren->credits` | `adjust`, `balances` |
+| `$siren->customCurrencies` | list, retrieve, create, update, delete (keyed by currency code) |
+| `$siren->credits` | `checkoutBalances`, `checkoutBalance`, `entries`, `holds`, `placeHold`, `adjust`, `balances` |
+| `$siren->mappings` | list, `forExternal`, `forLocal`, create, `deleteForCollaborator`, `deleteForExternal` |
+| `$siren->settings` | `collaborator`, `value` |
 | `$siren->collaboratorGroups` | list, retrieve, create, update, delete, `structures` |
 | `$siren->collaboratorGroups->members` | `list`, `add`, `set`, `remove` |
 
-Tracking codes and enrollments have no routes of their own in Siren. They
-live on the collaborator, and the `aliases` and `enrollments` helpers read
-and write them there:
+Tracking codes and enrollments have their own routes, and the collaborator
+record carries them too:
 
 ```php
-$siren->collaborators->aliases->list(42);              // [['code' => 'ADA', 'type' => 'tracking', ...]]
-$siren->collaborators->aliases->setTrackingCode(42, 'ADA2');
+$siren->collaborators->aliases->findByCode('SAVE10', 'coupon');         // who holds this coupon, or null
+$siren->collaborators->aliases->forCollaborator(42, 'tracking');        // their newest tracking code, or null
+$siren->collaborators->aliases->create('SAVE10', 'coupon', 42);
+$siren->collaborators->aliases->free('SAVE10', 'coupon');
 
-$siren->collaborators->enrollments->enroll(12, [42, 43]);     // keeps other enrollments
-$siren->collaborators->enrollments->replace(42, [12, 15]);    // exactly these programs
-$siren->collaborators->enrollments->programsFor(42);          // [['id' => 12, 'name' => ...]]
+$siren->collaborators->enrollments->list(['collaboratorId' => 42, 'programId' => [12, 15]]);
+$siren->collaborators->enrollments->add(42, 12);
+$siren->collaborators->enrollments->remove(42, 12);
+
+$siren->collaborators->enrollments->replace(42, [12, 15]);    // exactly these programs, through the collaborator
+$siren->collaborators->aliases->setTrackingCode(42, 'ADA2');  // through the collaborator's trackingId
 
 $siren->transactions->details(901);                    // line items
 $siren->credits->adjust(42, 'PTS', -500, 'Redeemed at checkout');
-$siren->credits->balances(42);
+$siren->credits->balances(42);                         // the collaborator's creditBalances field
 ```
 
 ## Connecting a host
@@ -334,6 +337,98 @@ the request with the new token. A request that was rejected with a 401 did
 nothing, so this repeat applies to writes as well. If the refresh returns
 null, or the repeated request gets another 401, the SDK raises
 `AuthenticationException`, which means the site needs to reconnect.
+
+### Connected sites
+
+A WordPress site connected to Siren Cloud reads and writes the
+organization's records with its OAuth token. Ask for the record scopes by
+name when the site connects. `connect:*` does not grant them:
+
+```php
+use Siren\Sdk\ConnectorScope;
+
+$authorizeUrl .= '&scope=' . rawurlencode(ConnectorScope::CONNECTED_SITE);
+// connect:* connect:webhooks connect:records:read connect:records:write
+```
+
+`connect:records:read` reads collaborators, codes, enrollments, mappings,
+programs, program groups, distributors, opportunities, transactions,
+engagements, conversions, obligations, payouts, custom currencies, store
+credit and the shared settings. `connect:records:write` writes only the
+records a person manages on the site:
+
+```php
+use Siren\Sdk\Resources\Credits;
+use Siren\Sdk\Resources\Mappings;
+
+// Collaborators are created pending, with no program, distributor or group lists.
+$ada = $siren->collaborators->createPending(['fullName' => 'Ada', 'nickname' => 'ada', 'email' => 'ada@example.com']);
+$siren->collaborators->updateDetails($ada['id'], ['nickname' => 'countess']);   // never status, email or bindings
+$siren->collaborators->enrollments->add($ada['id'], 12);                        // programs that run on this site only
+
+// Codes and mappings, by plain type.
+$siren->collaborators->aliases->create('SAVE10', 'coupon', $ada['id']);
+$siren->mappings->create($ada['id'], (string) $wpUserId, Mappings::EXTERNAL_TYPE_WORDPRESS_USER);
+$siren->mappings->forExternal('77', 'wc_product', 'collaborator');
+
+// Checkout: read what is available, then reserve it.
+$reference = Credits::holdReference('woocommerce', $sessionToken);
+$row = $siren->credits->checkoutBalance($ada['id'], 'STORE_CREDIT', $reference);
+
+if ($row !== null && $row['available'] > 0) {
+    $hold = $siren->credits->placeHold($ada['id'], 'STORE_CREDIT', $row['available'], $sessionToken, 'woocommerce');
+    // $hold['amount'] may be lower than asked.
+}
+
+$siren->settings->value('collaborator', 'urlReference', 'key');   // the referral link's query parameter
+$siren->customCurrencies->retrieve('STORE_CREDIT');
+```
+
+Cloud keeps each site's codes, mappings and holds apart by filing them
+under the site's Property, as in `coupon@property:5`. Send plain names. Every
+type, platform and token must be letters, digits, underscores and hyphens,
+and the SDK refuses anything else before it sends the request. Codes and
+mappings come back with the plain type and the Property in `propertyId`.
+Hold references come back as Cloud stores them. `PropertyQualifier` strips
+the suffix when a host needs the plain form.
+
+Cloud's own `user` mapping type links a collaborator to a Cloud account, and
+a site may not use it. A WordPress user is `wordpress_user`. The SDK serves
+every platform and sends the type it is given, so the WordPress host
+translates its `user` to `wordpress_user` at its own boundary. A missed
+translation fails loudly with a `PolicyException`.
+
+Opportunities, transactions, engagements, conversions, obligations, payouts
+and the credit ledger are read only for a site. They reach Cloud as events.
+Siren has no route to release a credit hold. A hold lapses at its `ttl`,
+placing again for the same session replaces it, and Cloud settles it from
+the order's redemption event.
+
+Each refusal has its own exception, so a host can react without parsing
+messages:
+
+| Exception | Meaning | What to do |
+|-----------|---------|------------|
+| `MissingScopeException` | The token lacks `getRequiredScope()`, usually because the site connected before the record scopes existed. | Reconnect the site. |
+| `SiteDisconnectedException` | The organization revoked the site. The SDK already tried one fresh token. | Stop calling Siren until the site reconnects. |
+| `PolicyException` | Cloud's rules refuse this request, such as a field in `getParam()` a site may not send or a program that does not run on the site. | Do not repeat it. |
+| `CodeConflictException` | Someone holds the code under that type, possibly another site. | Free it first, or choose another. |
+| `HoldConflictException` | `getReason()` is `no_credit` (nothing available) or `token_in_use` (another site's checkout used the token). | Apply no credit, or mint a new token. |
+| `HoldLimitException` | The collaborator already holds credit for ten live checkouts on this site. | Check out without credit. |
+| `RateLimitException` | The site spent its request budget. `getRetryAfter()` says how long to wait. | Back off. |
+
+A page or a checkout should never wait on a slow Siren. Give the client it
+uses there a short `timeout` and `maxRetries` of 0, so a timeout or a rate
+limit fails at once with an exception the host can fall back from:
+
+```php
+$checkoutSiren = new Siren([
+    'accessToken' => $tokens,
+    'httpClient'  => new WordPressHttpClient(),
+    'timeout'     => 3,
+    'maxRetries'  => 0,
+]);
+```
 
 ## Other SDKs
 
