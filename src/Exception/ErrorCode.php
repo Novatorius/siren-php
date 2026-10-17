@@ -38,6 +38,19 @@ final class ErrorCode
     /** 403: the route's own policy refuses the caller, such as a site writing an engine record. */
     public const NOT_PERMITTED = 'not_permitted';
 
+    /**
+     * 403: the organization's plan does not include the feature. A plain
+     * {@see PermissionException}, because a plan upgrade lifts it.
+     * `error.context.capability` names the feature.
+     */
+    public const PLAN_REQUIRED = 'plan_required';
+
+    /**
+     * 403: only an organization admin may do this. A plain
+     * {@see PermissionException}, because an admin's credential may.
+     */
+    public const ADMIN_REQUIRED = 'admin_required';
+
     /** 409: someone already holds the code under that type, in any namespace. */
     public const CODE_HELD = 'code_held';
 
@@ -76,6 +89,8 @@ final class ErrorCode
         self::USER_TYPE_NOT_ALLOWED,
         self::PROGRAM_NOT_ON_SITE,
         self::NOT_PERMITTED,
+        self::PLAN_REQUIRED,
+        self::ADMIN_REQUIRED,
         self::CODE_HELD,
         self::MAPPING_EXISTS,
         self::HOLD_NO_CREDIT,

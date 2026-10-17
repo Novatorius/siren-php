@@ -65,8 +65,9 @@ final class ExceptionFactory
             // the message when the reply has no code this SDK knows.
             401 => SiteDisconnectedException::matches($message, $code) ? SiteDisconnectedException::class : AuthenticationException::class,
             // A missing scope, which reconnecting fixes, or a policy refusal,
-            // which it does not. Any other 403, such as a plan entitlement,
-            // stays a plain PermissionException.
+            // which it does not. Any other 403 stays a plain
+            // PermissionException, such as a plan refusal (`plan_required`)
+            // or an admin-only action (`admin_required`).
             403 => match (true) {
                 MissingScopeException::matches($message, $code) => MissingScopeException::class,
                 PolicyException::matches($message, $data, $code) => PolicyException::class,

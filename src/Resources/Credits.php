@@ -257,11 +257,20 @@ final class Credits
 
     /**
      * Releases a store credit hold early with `DELETE /credit-holds/{id}`,
-     * so the credit it reserved is available again. Call it when a checkout
-     * is abandoned or no longer uses the credit.
+     * so the credit it reserved is available again. Call it only when the
+     * shopper abandons the credit, or it no longer applies to a cart that
+     * never became an order.
+     *
+     * Never release the hold of a checkout that became an order. Settlement
+     * consumes that hold when the order reaches Siren. Released first, the
+     * credit is free for another checkout to reserve and spend, and the
+     * order's settlement finds nothing left to debit, so the store gives the
+     * same credit twice. WooCommerce empties the cart right after an order is
+     * placed, so its cart-emptied hook is not a safe place to call this.
      *
      * Releasing is safe to repeat. A hold that already ended, released,
-     * expired or settled, comes back unchanged with no error. Siren answers
+     * expired or settled, comes back unchanged with no error, and so does a
+     * hold an order settled while the release waited. Siren answers
      * 404 for a hold this site's checkouts did not place.
      *
      * @return array<string, mixed> The hold as Siren now stores it.

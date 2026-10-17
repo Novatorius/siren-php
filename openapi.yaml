@@ -1636,8 +1636,11 @@ paths:
       operationId: releaseCreditHold
       summary: Release a store credit hold early
       description: |
-        Releases one hold, so the credit it reserved is available again. A
-        checkout calls it when it is abandoned or no longer uses the credit.
+        Releases one hold, so the credit it reserved is available again. Call
+        it only when the shopper abandons the credit, or it no longer applies
+        to a cart that never became an order. Never release the hold of a
+        checkout that became an order: settlement consumes that hold, and
+        releasing it first lets another checkout spend the same credit.
         A hold that already ended (released, expired or settled) comes back
         unchanged with 200, so a retry is safe. A connected site may release
         only holds its own checkouts placed, and any other id answers 404.
@@ -2384,7 +2387,8 @@ components:
         409 and hold cap 429 carry a stable `code` (see `ErrorCode` in the
         SDK): `site_disconnected`, `missing_scope`, `field_not_allowed`,
         `pending_status_required`, `user_type_not_allowed`,
-        `program_not_on_site`, `not_permitted`, `code_held`,
+        `program_not_on_site`, `not_permitted`, `plan_required`,
+        `admin_required`, `code_held`,
         `mapping_exists`, `hold_no_credit`, `hold_token_in_use` and
         `hold_limit`. Branch on the code, not the message.
       properties:
@@ -2451,7 +2455,9 @@ components:
         `field_not_allowed`, `pending_status_required`,
         `user_type_not_allowed`, `program_not_on_site` and `not_permitted`
         are policy refusals, and `error.context.param` names the refused
-        field when there is one.
+        field when there is one. `plan_required` means the plan does not
+        include the feature, and `admin_required` that only an admin may do
+        this.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

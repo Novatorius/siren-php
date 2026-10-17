@@ -37,6 +37,8 @@ final class ErrorCodesTest extends TestCase
             'USER_TYPE_NOT_ALLOWED' => 'user_type_not_allowed',
             'PROGRAM_NOT_ON_SITE' => 'program_not_on_site',
             'NOT_PERMITTED' => 'not_permitted',
+            'PLAN_REQUIRED' => 'plan_required',
+            'ADMIN_REQUIRED' => 'admin_required',
             'CODE_HELD' => 'code_held',
             'MAPPING_EXISTS' => 'mapping_exists',
             'HOLD_NO_CREDIT' => 'hold_no_credit',
@@ -120,6 +122,42 @@ final class ErrorCodesTest extends TestCase
         } catch (PermissionException $e) {
             $this->assertSame(PermissionException::class, $e::class);
         }
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function plainPermissionCodes(): array
+    {
+        return [
+            'a plan refusal' => [ErrorCode::PLAN_REQUIRED, 'Your plan does not include this feature.'],
+            'a plan refusal worded like a policy refusal' => [ErrorCode::PLAN_REQUIRED, "You don't have permission to do that."],
+            'an admin-only refusal' => [ErrorCode::ADMIN_REQUIRED, 'This action requires an organization admin.'],
+        ];
+    }
+
+    /**
+     * A plan or an admin's credential lifts these, so they are never a
+     * PolicyException, whose meaning is that repeating will fail again.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('plainPermissionCodes')]
+    public function testPlanAndAdminRefusalsStayAPlainPermissionException(string $code, string $message): void
+    {
+        $siren = $this->hostSiren([self::coded(403, $message, $code, ['capability' => 'collaborator-groups'])]);
+
+        try {
+            $siren->collaborators->list();
+            $this->fail('Expected a PermissionException.');
+        } catch (PermissionException $e) {
+            $this->assertSame(PermissionException::class, $e::class);
+            $this->assertSame($code, $e->getErrorCode());
+        }
+    }
+
+    public function testNoPlanOrAdminCodeIsAPolicyCode(): void
+    {
+        $this->assertNotContains(ErrorCode::PLAN_REQUIRED, ErrorCode::POLICY);
+        $this->assertNotContains(ErrorCode::ADMIN_REQUIRED, ErrorCode::POLICY);
     }
 
     public function testASiteDisconnectedCodeIsASiteDisconnectedExceptionWhateverTheMessage(): void

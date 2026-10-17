@@ -72,9 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Credits::releaseHold()` releases a store credit hold early with
   `DELETE /credit-holds/{id}`, so an abandoned checkout stops reserving
   credit before its `ttl` runs out. Releasing a hold that already ended is
-  not an error.
+  not an error. Never release the hold of a checkout that became an order,
+  because settlement consumes it.
 - `ErrorCode`, the stable `error.code` values Siren Cloud sends with a
-  connector's 401, 403, 409 and hold cap 429.
+  connector's 401, 403, 409 and hold cap 429, and with a plan refusal
+  (`plan_required`) or an admin-only refusal (`admin_required`). Those two
+  stay a plain `PermissionException`.
 
 ### Changed
 
