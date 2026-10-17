@@ -17,9 +17,17 @@ class SiteDisconnectedException extends AuthenticationException
     /** The message Siren Cloud sends for a revoked site. */
     public const MESSAGE = 'This site is no longer connected.';
 
-    /** Whether a 401 message is Siren's revoked-site refusal. */
-    public static function matches(string $message): bool
+    /**
+     * Whether a 401 is Siren's revoked-site refusal: the
+     * {@see ErrorCode::SITE_DISCONNECTED} code, or, from a Cloud deployment
+     * that sends no code, the message.
+     */
+    public static function matches(string $message, ?string $code = null): bool
     {
+        if (ErrorCode::isKnown($code)) {
+            return $code === ErrorCode::SITE_DISCONNECTED;
+        }
+
         return stripos($message, 'no longer connected') !== false;
     }
 }
