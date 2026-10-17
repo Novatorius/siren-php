@@ -47,7 +47,7 @@ final class SirenClientTest extends TestCase
         $request = $this->lastRequest();
         $this->assertSame('application/json', $request->getHeaderLine('Content-Type'));
         $this->assertSame('application/json', $request->getHeaderLine('Accept'));
-        $this->assertSame('siren-php-sdk/0.1.0', $request->getHeaderLine('User-Agent'));
+        $this->assertSame('siren-php-sdk/0.2.0', $request->getHeaderLine('User-Agent'));
     }
 
     public function testDefaultsToTheProductionBaseUrl(): void
