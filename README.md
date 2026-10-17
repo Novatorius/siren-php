@@ -241,7 +241,7 @@ automatically.
 | `$siren->engagements` | list, retrieve, `types`, `calculations` |
 | `$siren->distributors` | list, retrieve, create, update, delete, bulk, `creditMetric` |
 | `$siren->customCurrencies` | list, retrieve, create, update, delete (keyed by currency code) |
-| `$siren->credits` | `checkoutBalances`, `checkoutBalance`, `entries`, `holds`, `placeHold`, `adjust`, `balances` |
+| `$siren->credits` | `checkoutBalances`, `checkoutBalance`, `entries`, `holds`, `placeHold`, `releaseHold`, `adjust`, `balances` |
 | `$siren->mappings` | list, `forExternal`, `forLocal`, create, `deleteForCollaborator`, `deleteForExternal` |
 | `$siren->settings` | `collaborator`, `value` |
 | `$siren->collaboratorGroups` | list, retrieve, create, update, delete, `structures` |
@@ -380,6 +380,10 @@ if ($row !== null && $row['available'] > 0) {
     // $hold['amount'] may be lower than asked.
 }
 
+// The shopper took the store credit off a cart that is still a cart: give
+// it back now, not at the ttl. Never do this once the cart became an order.
+$siren->credits->releaseHold($hold['id']);
+
 $siren->settings->value('collaborator', 'urlReference', 'key');   // the referral link's query parameter
 $siren->customCurrencies->retrieve('STORE_CREDIT');
 ```
@@ -400,12 +404,24 @@ translation fails loudly with a `PolicyException`.
 
 Opportunities, transactions, engagements, conversions, obligations, payouts
 and the credit ledger are read only for a site. They reach Cloud as events.
-Siren has no route to release a credit hold. A hold lapses at its `ttl`,
-placing again for the same session replaces it, and Cloud settles it from
-the order's redemption event.
+A credit hold lapses at its `ttl`, placing again for the same session
+replaces it, and Cloud settles it from the order's redemption event. A site
+can also release one of its holds early with `releaseHold()`. Releasing a
+hold that already ended returns it unchanged, so a retry is safe.
+
+> **Never release the hold of a checkout that became an order.** Settlement
+> consumes that hold when the order reaches Cloud. Released first, the credit
+> is free for another checkout to reserve and spend, and the order's
+> settlement then finds nothing left to debit, so the store gives the same
+> credit twice. WooCommerce empties the cart right after an order is placed,
+> so its cart-emptied hook is not a safe place to release. Release only when
+> the shopper abandons the credit, or it no longer applies to a cart that
+> never became an order.
 
 Each refusal has its own exception, so a host can react without parsing
-messages:
+messages. Cloud names each refusal with a stable `error.code`, listed in
+`ErrorCode`, and the SDK picks the exception from the code first. A reply
+with no code, from an older Cloud deployment, is read by its wording.
 
 | Exception | Meaning | What to do |
 |-----------|---------|------------|

@@ -69,8 +69,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HoldLimitException` for the per-site hold cap's 429. Each extends the
   exception the status already raised.
 - `ListResult::map()`.
+- `Credits::releaseHold()` releases a store credit hold early with
+  `DELETE /credit-holds/{id}`, so an abandoned checkout stops reserving
+  credit before its `ttl` runs out. Releasing a hold that already ended is
+  not an error. Never release the hold of a checkout that became an order,
+  because settlement consumes it.
+- `ErrorCode`, the stable `error.code` values Siren Cloud sends with a
+  connector's 401, 403, 409 and hold cap 429, and with a plan refusal
+  (`plan_required`) or an admin-only refusal (`admin_required`). Those two
+  stay a plain `PermissionException`.
 
 ### Changed
+
+- The typed refusals now follow Siren Cloud's `error.code` first, so a
+  reworded message no longer changes which exception a host catches. A
+  reply with no code, from a Cloud deployment older than the codes, is still
+  read by its wording. `MissingScopeException::getRequiredScope()` reads
+  `error.context.scope` when Cloud sends it.
 
 - Guzzle is no longer required. It moved to `suggest`, and the SDK uses it
   when installed and PHP streams when not. Code that passes its own

@@ -12,8 +12,11 @@ namespace Siren\Sdk\Exception;
  * currency, so the checkout should apply no credit. With
  * {@see REASON_TOKEN_IN_USE} another site's checkout already holds credit
  * for this collaborator and currency under the same session token, so the
- * checkout should mint a new token. Siren says which only in its message,
- * so the reason is null when the wording is unfamiliar.
+ * checkout should mint a new token. Siren says which with its
+ * {@see ErrorCode::HOLD_NO_CREDIT} and {@see ErrorCode::HOLD_TOKEN_IN_USE}
+ * codes. A Cloud deployment older than the codes says which only in its
+ * message, so the reason is null when the reply has no code and the
+ * wording is unfamiliar.
  */
 class HoldConflictException extends ConflictException
 {
@@ -31,9 +34,23 @@ class HoldConflictException extends ConflictException
         );
     }
 
-    /** One of the `REASON_*` constants, or null when Siren's message names neither. */
+    /** One of the `REASON_*` constants, or null when Siren's reply names neither. */
     public function getReason(): ?string
     {
+        $code = $this->getErrorCode();
+
+        if ($code === ErrorCode::HOLD_TOKEN_IN_USE) {
+            return self::REASON_TOKEN_IN_USE;
+        }
+
+        if ($code === ErrorCode::HOLD_NO_CREDIT) {
+            return self::REASON_NO_CREDIT;
+        }
+
+        if (ErrorCode::isKnown($code)) {
+            return null;
+        }
+
         $message = strtolower($this->getMessage());
 
         if (str_contains($message, 'under that token')) {

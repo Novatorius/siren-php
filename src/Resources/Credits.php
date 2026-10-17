@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk\Resources;
 
 use Siren\Sdk\Exception\ConflictException;
+use Siren\Sdk\Exception\ErrorCode;
 use Siren\Sdk\Exception\HoldConflictException;
 use Siren\Sdk\Exception\HoldLimitException;
 use Siren\Sdk\Exception\RateLimitException;
@@ -17,14 +18,16 @@ use Siren\Sdk\PropertyQualifier;
  * ledger behind them, and the holds checkouts place on them.
  *
  * Amounts are whole minor units. A connected site's token may read
- * {@see entries()}, {@see checkoutBalances()} and {@see holds()}, and place holds
- * with {@see placeHold()}. Only Siren writes the ledger, through the
- * engine and the dashboard's {@see adjust()}.
+ * {@see entries()}, {@see checkoutBalances()} and {@see holds()}, place holds
+ * with {@see placeHold()} and release them with {@see releaseHold()}. Only
+ * Siren writes the ledger, through the engine and the dashboard's
+ * {@see adjust()}.
  *
- * Siren has no route to release a hold. A hold ends when its `ttl` runs out
- * (Siren Cloud sweeps expired holds every five minutes and an expired hold
- * reserves nothing), when the same checkout places again and replaces it, or
- * when Siren settles it from the order's redemption event.
+ * A hold ends when its `ttl` runs out (Siren Cloud sweeps expired holds
+ * every five minutes and an expired hold reserves nothing), when the same
+ * checkout places again and replaces it, when the site releases it early
+ * with {@see releaseHold()}, or when Siren settles it from the order's
+ * redemption event.
  */
 final class Credits
 {
@@ -241,8 +244,7 @@ final class Credits
         } catch (ConflictException $e) {
             throw HoldConflictException::fromConflict($e);
         } catch (RateLimitException $e) {
-            // Siren's request rate limit names a wait. The hold cap does not.
-            if ($e->getRetryAfter() === null && !isset($e->getErrorData()['retryAfter'])) {
+            if (self::isHoldLimit($e)) {
                 throw HoldLimitException::fromRateLimit($e);
             }
 
@@ -251,6 +253,51 @@ final class Credits
 
         /** @var array<string, mixed> $hold */
         return $hold;
+    }
+
+    /**
+     * Releases a store credit hold early with `DELETE /credit-holds/{id}`,
+     * so the credit it reserved is available again. Call it only when the
+     * shopper abandons the credit, or it no longer applies to a cart that
+     * never became an order.
+     *
+     * Never release the hold of a checkout that became an order. Settlement
+     * consumes that hold when the order reaches Siren. Released first, the
+     * credit is free for another checkout to reserve and spend, and the
+     * order's settlement finds nothing left to debit, so the store gives the
+     * same credit twice. WooCommerce empties the cart right after an order is
+     * placed, so its cart-emptied hook is not a safe place to call this.
+     *
+     * Releasing is safe to repeat. A hold that already ended, released,
+     * expired or settled, comes back unchanged with no error, and so does a
+     * hold an order settled while the release waited. Siren answers
+     * 404 for a hold this site's checkouts did not place.
+     *
+     * @return array<string, mixed> The hold as Siren now stores it.
+     *
+     * @throws \Siren\Sdk\Exception\NotFoundException When no hold of this site has that id.
+     */
+    public function releaseHold(int $holdId): array
+    {
+        $hold = $this->transport->request('DELETE', '/credit-holds/' . self::id($holdId))->json();
+
+        /** @var array<string, mixed> $hold */
+        return $hold;
+    }
+
+    /**
+     * Whether a 429 is the hold cap rather than a request rate limit. Siren
+     * names the cap with {@see ErrorCode::HOLD_LIMIT}. A deployment that
+     * sends no code is read the old way: the rate limit names a wait and the
+     * cap does not.
+     */
+    private static function isHoldLimit(RateLimitException $e): bool
+    {
+        if (ErrorCode::isKnown($e->getErrorCode())) {
+            return $e->getErrorCode() === ErrorCode::HOLD_LIMIT;
+        }
+
+        return $e->getRetryAfter() === null && !isset($e->getErrorData()['retryAfter']);
     }
 
     /**

@@ -21,14 +21,20 @@ class PolicyException extends PermissionException
     public const DENIED_MESSAGE = "You don't have permission to do that.";
 
     /**
-     * Whether a 403 is a policy refusal. Siren's connector rules name the
-     * refused field in `error.context.param` or say what a connected site may
-     * not do, and a route's own policy answers {@see DENIED_MESSAGE}.
+     * Whether a 403 is a policy refusal: one of the {@see ErrorCode::POLICY}
+     * codes. From a Cloud deployment that sends no code, Siren's connector
+     * rules name the refused field in `error.context.param` or say what a
+     * connected site may not do, and a route's own policy answers
+     * {@see DENIED_MESSAGE}.
      *
      * @param array<string, mixed>|null $data
      */
-    public static function matches(string $message, ?array $data): bool
+    public static function matches(string $message, ?array $data, ?string $code = null): bool
     {
+        if (ErrorCode::isKnown($code)) {
+            return in_array($code, ErrorCode::POLICY, true);
+        }
+
         if (is_string($data['param'] ?? null)) {
             return true;
         }
