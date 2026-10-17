@@ -41,6 +41,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed validation with 400 and `error.context.failedValidations`, which the
   SDK now reads, with `VALIDATION_FAILED` as the error code.
 
+- The record routes Siren Cloud opens to a connected site's token (Siren
+  PR 384), each with the route's own filters, paging and input rules:
+  - `collaborators->aliases`: `findByCode()`, `forCollaborator()`,
+    `query()`, `create()` and `free()` on `/collaborator-aliases`.
+  - `collaborators->enrollments`: `list()`, `add()` and `remove()` on
+    `/collaborator-programs`.
+  - `$siren->mappings`, a new resource: `list()`, `forExternal()`,
+    `forLocal()`, `create()`, `deleteForCollaborator()` and
+    `deleteForExternal()`. Every call names an external type.
+  - `$siren->settings`, a new resource: `collaborator()` and `value()` on
+    `/configs`.
+  - `credits`: `checkoutBalances()` and `checkoutBalance()` on
+    `/credit-balances`, `entries()`, `holds()`, `placeHold()` and the
+    `holdReference()` helper.
+  - `customCurrencies->retrieve()` by code.
+  - `collaborators->createPending()` and `collaborators->updateDetails()`,
+    which leave out the fields Siren refuses from a connected site.
+- `ConnectorScope`, the OAuth scopes a connected site asks for, including the
+  explicit `connect:records:read` and `connect:records:write`.
+- `PropertyQualifier`. Codes and mappings now come back with the plain type
+  and the site's Property in `propertyId`, and every type, platform and
+  token is checked against Siren's name rule before it is sent.
+- Typed refusals: `MissingScopeException` and `PolicyException` for 403,
+  `SiteDisconnectedException` for a revoked site's 401,
+  `CodeConflictException` and `HoldConflictException` for 409, and
+  `HoldLimitException` for the per-site hold cap's 429. Each extends the
+  exception the status already raised.
+- `ListResult::map()`.
+
 ### Changed
 
 - Guzzle is no longer required. It moved to `suggest`, and the SDK uses it

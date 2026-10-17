@@ -23,9 +23,9 @@ use Siren\Sdk\PropertyQualifier;
  * Cloud's own `user` type links a collaborator to a Cloud account, and Cloud
  * refuses it from a connected site with a 403, raised as
  * {@see \Siren\Sdk\Exception\PolicyException}. A WordPress user is
- * {@see EXTERNAL_TYPE_WORDPRESS_USER}. The SDK does not translate between
- * the two, because an API key may still read and write `user` links. A
- * WordPress host translates at its own boundary.
+ * {@see EXTERNAL_TYPE_WORDPRESS_USER}. The SDK serves every platform and
+ * sends the type it is given, so a WordPress host translates its own `user`
+ * to `wordpress_user` at its boundary.
  *
  * Only collaborator links can be written. Siren makes the order,
  * transaction and opportunity links as it processes events.
