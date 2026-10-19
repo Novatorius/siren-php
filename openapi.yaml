@@ -17,10 +17,10 @@ info:
     collaborator groups.
 
     Requests authenticate with a bearer token. Event ingestion
-    (`POST /event/{eventSlug}`) accepts an organization API key
-    (`Authorization: Bearer sk_live_...`), and a connected site's OAuth access
-    token for the events its integrations forward and `site-visited`. An API
-    key works on the event routes only. API keys and webhook subscriptions
+    (`POST /event/{eventSlug}`) and `GET /ping` accept an organization API
+    key (`Authorization: Bearer sk_live_...`), and a connected site's OAuth
+    access token for the events its integrations forward and `site-visited`.
+    An API key works on those routes only. API keys and webhook subscriptions
     are managed with a signed-in dashboard session. The record routes accept
     a signed-in dashboard session, and a
     connected site's token on the routes Siren Cloud opens to connectors,
@@ -38,7 +38,7 @@ info:
 
     Successful responses are bare JSON: an object for one record, and the
     list envelope `{ "items", "total", "page", "perPage", "totalPages" }`
-    for lists. Lists page with `number` (page size, at most 200) and
+    for lists. Lists page with `number` (page size, lowered to 200 when larger) and
     `offset`. Failures return `{ "error": ... }`, where `error` is a string
     or `{ "message", "code", "data" }`.
 
@@ -247,13 +247,43 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /ping:
+    get:
+      tags: [Events]
+      operationId: ping
+      summary: Check a credential
+      description: |
+        Answers with the organization the credential belongs to, so a sender
+        can check its API key before it sends events.
+      security:
+        - apiKey: []
+        - connectorToken: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The credential works.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, org]
+                properties:
+                  ok: { type: boolean, const: true }
+                  org:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      name: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /webhooks:
     get:
       tags: [Webhooks]
       operationId: listWebhookSubscriptions
       summary: List webhook subscriptions
       description: |
-        Pages with `number` (1 to 200, default 200) and `offset`. An
+        Pages with `number` (default 200, and a size above 200 is lowered to
+        200) and `offset`. An
         organization holds at most 100 subscriptions.
       security:
         - dashboardSession: []
@@ -363,7 +393,9 @@ paths:
       tags: [API Keys]
       operationId: listApiKeys
       summary: List API keys
-      description: Pages with `number` (1 to 200, default 200) and `offset`.
+      description: |
+        Pages with `number` (default 200, and a size above 200 is lowered to
+        200) and `offset`.
       security:
         - dashboardSession: []
       parameters:
@@ -2323,7 +2355,7 @@ components:
         Page size. Siren answers 400 below 1 and lowers a size above 200 to
         200. The PHP SDK also accepts
         `perPage` and `page` and turns them into `number` and `offset`.
-      schema: { type: integer, minimum: 1, maximum: 200, default: 10 }
+      schema: { type: integer, minimum: 1, default: 10 }
     Offset:
       name: offset
       in: query
@@ -2453,10 +2485,12 @@ components:
           description: Commerce source identifier.
           example: stripe
         externalId:
-          type: string
+          type: [string, number]
           minLength: 1
           maxLength: 32
-          description: Your order/transaction id; used to match refunds later.
+          description: |
+            Your order or transaction id, used to match refunds later. Siren
+            also takes a number and stores it as text.
           example: cs_test_a1b2c3
         total:
           type: number
@@ -2481,8 +2515,8 @@ components:
       type: object
       required: [amount]
       properties:
-        externalId: { type: string }
-        name: { type: string, example: Pro Plan (annual) }
+        externalId: { type: [string, number], maxLength: 255, description: 'Text, or a number that Siren stores as text.' }
+        name: { type: [string, number], maxLength: 255, description: 'Text, or a number that Siren stores as text.', example: Pro Plan (annual) }
         quantity: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
         amount:
           type: number
@@ -2493,7 +2527,7 @@ components:
       required: [source, externalId]
       properties:
         source: { type: string, example: stripe }
-        externalId: { type: string, example: cs_test_a1b2c3 }
+        externalId: { type: [string, number], minLength: 1, maxLength: 32, example: cs_test_a1b2c3 }
     SiteVisitedPayload:
       type: object
       required: [collaboratorId]

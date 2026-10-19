@@ -81,7 +81,10 @@ existing callers. Each one follows a rule Siren already enforces.
   balances, the `platformId` length after Cloud adds the Property, and the
   empty body `conversions->update()` returns.
 - `openapi.yaml` lists the obligation and payout filters, answers 204 for
-  group deletes, and says a page size above 200 is lowered to 200.
+  group deletes, and says a page size above 200 is lowered to 200. The page
+  size schema no longer sets a maximum, `externalId` on a sale, a refund
+  and a line item takes a string or a number, and `GET /ping` is listed
+  with the credentials it takes.
 - `HoldLimitException` and `ErrorCode::HOLD_LIMIT` are documented as
   retired. Siren no longer caps credit holds, so it never sends `hold_limit`.
 
