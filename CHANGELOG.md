@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The next release is 0.3.0, a minor bump, because the changes below break
-existing callers. Each one follows a rule Siren already enforces.
+## [0.3.0] - 2026-10-19
+
+This is a minor bump, because the changes below break existing callers. Each
+one follows a rule Siren already enforces.
 
 ### Breaking
 
@@ -257,6 +259,7 @@ existing callers. Each one follows a rule Siren already enforces.
 - Automatic retries with exponential backoff on idempotent operations.
 - Typed exception hierarchy under `Siren\Sdk\Exception`.
 
-[Unreleased]: https://github.com/Novatorius/siren-php/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/Novatorius/siren-php/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/Novatorius/siren-php/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/Novatorius/siren-php/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Novatorius/siren-php/releases/tag/0.1.0
