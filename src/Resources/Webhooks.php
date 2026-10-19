@@ -44,13 +44,14 @@ final class Webhooks
      * payload itself as the body, and Siren names the event in the
      * `X-Siren-Event` header and the delivery in `X-Siren-Delivery`. Pass
      * those two headers as `$eventType` and `$deliveryId`, or use
-     * {@see constructEventFromHeaders()}, which reads all three. Without
-     * them such an event has an empty type. A connected site's subscription
-     * receives an envelope that names its own type, data and id, and is
-     * read from the body.
+     * {@see constructEventFromHeaders()}, which reads all three. Such a
+     * delivery without `$eventType` is refused. A connected site's
+     * subscription receives an envelope that names its own type, data and
+     * id, and is read from the body.
      *
      * @throws SignatureVerificationException when the signature is missing,
-     *         malformed, or does not match the body.
+     *         malformed, or does not match the body, when the body is not
+     *         JSON, and when a flat payload arrives without `$eventType`.
      */
     public function constructEvent(
         string $rawBody,
@@ -84,9 +85,11 @@ final class Webhooks
         // An envelope names its own type and wraps the payload in `data`. A
         // connected site's subscription gets one, with the delivery id in
         // `id`. Every other subscription gets the flat payload, with the type
-        // and delivery id in headers.
-        if (is_string($decoded['type'] ?? null) && $decoded['type'] !== '' && is_array($decoded['data'] ?? null)) {
-            $envelopeId = $decoded['id'] ?? $decoded['deliveryId'] ?? null;
+        // and delivery id in headers. The envelope is known by its `version`,
+        // because a flat payload may carry a `type` of its own, as
+        // `currency.created` does.
+        if (self::isEnvelope($decoded)) {
+            $envelopeId = $decoded['id'] ?? null;
 
             return new WebhookEvent(
                 type: $decoded['type'],
@@ -96,8 +99,19 @@ final class Webhooks
             );
         }
 
+        // A flat body never names its event. Without the X-Siren-Event header
+        // there is nothing to dispatch on, so refuse the delivery loudly
+        // instead of returning an event with an empty type that matches no
+        // handler. Code written for 0.2.0 passes no headers.
+        if ($eventType === null) {
+            throw new SignatureVerificationException(
+                'Siren names this delivery\'s event in the X-Siren-Event header, and the body does not '
+                . 'carry it. Pass that header as $eventType, or call constructEventFromHeaders().',
+            );
+        }
+
         return new WebhookEvent(
-            type: $eventType ?? '',
+            type: $eventType,
             data: $decoded,
             deliveryId: $deliveryId,
             body: $decoded,
@@ -156,6 +170,20 @@ final class Webhooks
         $expected = hash_hmac('sha256', $rawBody, $secret);
 
         return hash_equals($expected, $provided);
+    }
+
+    /**
+     * Whether a body is the versioned envelope a connected site's
+     * subscription receives: `{version, id, type, data, records, ...}`.
+     *
+     * @param array<int|string, mixed> $decoded
+     */
+    private static function isEnvelope(array $decoded): bool
+    {
+        return is_int($decoded['version'] ?? null)
+            && is_string($decoded['type'] ?? null)
+            && $decoded['type'] !== ''
+            && is_array($decoded['data'] ?? null);
     }
 
     private static function nonEmpty(?string $value): ?string

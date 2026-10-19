@@ -25,8 +25,8 @@ final class WebhookEvent
     /**
      * The event type, e.g. `conversion.approved`. See {@see WebhookEventType}.
      *
-     * Empty when the delivery's body did not name it and the `X-Siren-Event`
-     * header was not passed to `constructEvent()`.
+     * From the `X-Siren-Event` header, or from the envelope a connected
+     * site's subscription receives.
      */
     public function getType(): string
     {

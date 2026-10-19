@@ -18,13 +18,14 @@ final class WebhooksTest extends TestCase
         return 'sha256=' . hash_hmac('sha256', $body, $secret);
     }
 
+    /**
+     * A delivery body as Siren's WebhookDeliveryService sends it to a
+     * subscription with no Property: the event payload alone. The type and
+     * delivery id travel in headers.
+     */
     private static function payload(): string
     {
-        return json_encode([
-            'type' => 'conversion.approved',
-            'data' => ['id' => 501, 'amount' => 12.5],
-            'deliveryId' => 'dlv_abc123',
-        ], JSON_THROW_ON_ERROR);
+        return json_encode(['conversionId' => 501, 'amount' => 12.5], JSON_THROW_ON_ERROR);
     }
 
     public function testConstructEventReturnsAVerifiedEvent(): void
@@ -32,12 +33,76 @@ final class WebhooksTest extends TestCase
         $siren = $this->mockSiren([]);
         $body = self::payload();
 
-        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET);
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'conversion.approved', 'evt_abc123');
 
         $this->assertInstanceOf(WebhookEvent::class, $event);
         $this->assertSame(WebhookEventType::CONVERSION_APPROVED, $event->getType());
-        $this->assertSame(['id' => 501, 'amount' => 12.5], $event->getData());
-        $this->assertSame('dlv_abc123', $event->getDeliveryId());
+        $this->assertSame(['conversionId' => 501, 'amount' => 12.5], $event->getData());
+        $this->assertSame('evt_abc123', $event->getDeliveryId());
+    }
+
+    /**
+     * Code written for 0.2.0 calls constructEvent() with three arguments. A
+     * flat body names no event, so the SDK refuses it instead of returning
+     * an event with an empty type that no handler matches.
+     */
+    public function testConstructEventRefusesAFlatBodyWithoutTheEventHeader(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = self::payload();
+
+        $this->expectException(SignatureVerificationException::class);
+        $this->expectExceptionMessage('X-Siren-Event');
+
+        $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET);
+    }
+
+    public function testConstructEventRefusesABlankEventHeader(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = self::payload();
+
+        $this->expectException(SignatureVerificationException::class);
+
+        $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, '  ', 'evt_1');
+    }
+
+    /**
+     * Only an envelope carries `version`. A flat payload with its own `type`
+     * and `data` keys is still the payload, and still needs the header.
+     */
+    public function testAFlatBodyWithTypeAndDataKeysIsNotAnEnvelope(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode(['type' => 'points', 'data' => ['note' => 'x']], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'currency.created', 'evt_9');
+
+        $this->assertSame(WebhookEventType::CURRENCY_CREATED, $event->getType());
+        $this->assertSame(['type' => 'points', 'data' => ['note' => 'x']], $event->getData());
+
+        $this->expectException(SignatureVerificationException::class);
+        $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET);
+    }
+
+    /** An envelope names its own type and id, so it needs no headers. */
+    public function testAnEnvelopeNeedsNoHeaders(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode([
+            'version' => 1,
+            'id' => 'evt_test',
+            'type' => 'webhook.test',
+            'kind' => 'test',
+            'data' => ['nonce' => 'abc'],
+            'records' => new \stdClass(),
+        ], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET);
+
+        $this->assertSame('webhook.test', $event->getType());
+        $this->assertSame(['nonce' => 'abc'], $event->getData());
+        $this->assertSame('evt_test', $event->getDeliveryId());
     }
 
     public function testConstructEventRejectsATamperedBody(): void
