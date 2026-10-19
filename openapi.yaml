@@ -421,6 +421,53 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /webhooks/{id}/test:
+    post:
+      tags: [Webhooks]
+      operationId: sendWebhookTest
+      summary: Send a test delivery
+      description: |
+        Sends the subscription one signed sample delivery now. Siren answers
+        200 whatever the endpoint answered, with what came of it, and the
+        test shows in the subscription's delivery history. Siren answers 404
+        for a subscription the organization does not have and 409 for a
+        paused one. Each test makes Siren send a request, so the number of
+        tests per hour is limited, and Siren answers 429 past it.
+
+        An API key needs `webhook-subscriptions:manage`, and must be
+        organization-wide. A key that holds only `webhook-subscriptions:read`
+        is refused with 403 `missing_scope`, and a key bound to one store
+        with 403 `store_key_not_allowed`.
+      security:
+        - apiKey: ['webhook-subscriptions:manage']
+        - dashboardSession: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: The test was sent. The body says what the endpoint answered.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivered: { type: boolean, description: Whether the endpoint accepted the delivery. }
+                  httpStatus: { type: [integer, 'null'], description: The status the endpoint answered with, or null when it could not be reached. }
+                  error: { type: [string, 'null'], description: Why the delivery failed, when it did. }
+                  eventType: { type: string, description: The event type the sample delivery named. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The subscription is paused.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Too many test deliveries in the last hour.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api-keys:
     get:
       tags: [API Keys]

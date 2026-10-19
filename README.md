@@ -174,7 +174,7 @@ $key = $siren->apiKeys->create([
 | `ApiKeyScope::LEDGER_OBLIGATIONS_READ` | `obligations->list()` |
 | `ApiKeyScope::LEDGER_PAYOUTS_READ` | `payouts->list()` |
 | `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ` | `webhooks->subscriptions->list()`, `events()` |
-| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE` | Every `webhooks->subscriptions` call |
+| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE` | Every `webhooks->subscriptions` call, and a test delivery (`POST /webhooks/{id}/test`, which the SDK has no method for) |
 
 Siren grants the ledger and webhook scopes only by their exact names. `*`,
 `event:*`, wildcards such as `ledger:*`, and older names such as

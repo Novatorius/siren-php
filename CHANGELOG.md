@@ -39,7 +39,9 @@ one follows a rule Siren already enforces.
   `events()` take a key with `webhook-subscriptions:read` or
   `webhook-subscriptions:manage`, and `create()` and `delete()` take one with
   `webhook-subscriptions:manage`. A dashboard session's token still works on
-  all of them.
+  all of them. Since Siren Cloud 3.6.260, `webhook-subscriptions:manage` also
+  sends a test delivery, and `openapi.yaml` lists that route,
+  `POST /webhooks/{id}/test`.
 - `ApiKeyScope::LEDGER_CONVERSIONS_READ`, `LEDGER_TRANSACTIONS_READ`,
   `LEDGER_OBLIGATIONS_READ`, `LEDGER_PAYOUTS_READ`,
   `WEBHOOK_SUBSCRIPTIONS_READ` and `WEBHOOK_SUBSCRIPTIONS_MANAGE`, and

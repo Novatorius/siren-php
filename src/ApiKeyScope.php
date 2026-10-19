@@ -23,7 +23,7 @@ namespace Siren\Sdk;
  * - {@see WEBHOOK_SUBSCRIPTIONS_READ} lists subscriptions, reads one, and
  *   reads the event catalog and a subscription's deliveries.
  * - {@see WEBHOOK_SUBSCRIPTIONS_MANAGE} does all of that, and creates,
- *   changes and deletes subscriptions.
+ *   changes and deletes subscriptions and sends a test delivery.
  *
  * Siren grants each of these six only by its exact name. {@see FULL_ACCESS},
  * {@see ALL_EVENTS}, wildcards such as `ledger:*`, and the older names such
@@ -70,8 +70,8 @@ final class ApiKeyScope
 
     /**
      * Everything {@see WEBHOOK_SUBSCRIPTIONS_READ} opens, plus creating,
-     * changing and deleting subscriptions. Sending a test delivery still
-     * takes a dashboard session.
+     * changing and deleting subscriptions and sending a test delivery
+     * (`POST /webhooks/{id}/test`).
      */
     public const WEBHOOK_SUBSCRIPTIONS_MANAGE = 'webhook-subscriptions:manage';
 
