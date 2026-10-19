@@ -22,7 +22,9 @@ use Siren\Sdk\PropertyQualifier;
  *
  * Cloud's own `user` type links a collaborator to a Cloud account, and Cloud
  * refuses it from a connected site with a 403, raised as
- * {@see \Siren\Sdk\Exception\PolicyException}. A WordPress user is
+ * {@see \Siren\Sdk\Exception\PolicyException}. Siren refuses to write or
+ * delete it for every other caller too, because only a confirmed account
+ * link may set it. A WordPress user is
  * {@see EXTERNAL_TYPE_WORDPRESS_USER}. The SDK serves every platform and
  * sends the type it is given, so a WordPress host translates its own `user`
  * to `wordpress_user` at its boundary.

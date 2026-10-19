@@ -9,6 +9,10 @@ namespace Siren\Sdk\Exception;
  * collaborator already holds credit for ten other live checkouts on this
  * site.
  *
+ * Siren no longer caps holds, so a current deployment never sends this
+ * refusal and the SDK never raises this exception for it. The class stays
+ * so code that catches it keeps working.
+ *
  * Siren names it with the {@see ErrorCode::HOLD_LIMIT} code. A Cloud
  * deployment older than the codes sends none, and then the missing
  * `Retry-After` tells the cap from a rate limit.

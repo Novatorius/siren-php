@@ -31,6 +31,9 @@ class ListResource
     /** The largest page Siren serves. A larger `number` is lowered to this. */
     public const MAX_PAGE_SIZE = 200;
 
+    /** The most ids one bulk action may carry. Siren answers 400 past it. */
+    public const MAX_BULK_IDS = 500;
+
     public function __construct(
         protected readonly HttpTransport $transport,
         protected readonly string $path,
@@ -114,6 +117,13 @@ class ListResource
 
         if ($ids === []) {
             throw new \InvalidArgumentException('A bulk action needs at least one id.');
+        }
+
+        if (count($ids) > self::MAX_BULK_IDS) {
+            throw new \InvalidArgumentException(sprintf(
+                'A bulk action takes at most %d ids. Send the rest in another call.',
+                self::MAX_BULK_IDS,
+            ));
         }
 
         return $this->write('POST', $this->path . '/bulk', ['action' => $action, 'ids' => array_values($ids)] + $extra);

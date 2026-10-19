@@ -78,10 +78,18 @@ class Siren
     /** Transactions and their details: list, read, create, and bulk actions. */
     public readonly Transactions $transactions;
 
-    /** Reconciliation reader for `GET /obligations`. */
+    /**
+     * Reconciliation reader for `GET /obligations`. Filters: `id`,
+     * `collaboratorId`, `status`, `awardType`, `payoutId`, `opportunityId`.
+     */
     public readonly ListResource $obligations;
 
-    /** Reconciliation reader for `GET /payouts`. */
+    /**
+     * Reconciliation reader for `GET /payouts`. Filters: `id`,
+     * `fulfillmentId`, `collaboratorId`, `status`, `currency`. A connected
+     * site must send `id`, `collaboratorId` or `fulfillmentId`, or Siren
+     * Cloud answers 403 with `site_filter_required`.
+     */
     public readonly ListResource $payouts;
 
     /** Collaborators, with their tracking codes (`->aliases`) and program enrollments (`->enrollments`). */

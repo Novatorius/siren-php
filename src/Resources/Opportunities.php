@@ -27,6 +27,10 @@ class Opportunities extends ListResource
      * `orderBy` (`id`, `status`, `lastTriggered`, `dateCreated`,
      * `dateModified`) and `order`.
      *
+     * A connected site must filter by `collaboratorId` or `id`. Without one
+     * Siren Cloud answers 403 with
+     * {@see \Siren\Sdk\Exception\ErrorCode::SITE_FILTER_REQUIRED}.
+     *
      * @param array<string, mixed> $params
      */
     public function list(array $params = []): ListResult

@@ -215,7 +215,7 @@ final class WebhooksTest extends TestCase
 
         $this->assertSame('*', $constants['ALL']);
         // The full canonical set is pinned in TaxonomyTest.
-        $this->assertCount(32, $constants, 'Expected 31 event types plus ALL.');
+        $this->assertCount(35, $constants, 'Expected 34 event types plus ALL.');
 
         foreach ($constants as $name => $value) {
             if ($name === 'ALL') {
@@ -224,5 +224,103 @@ final class WebhooksTest extends TestCase
 
             $this->assertMatchesRegularExpression('/^[a-z]+\.[a-z]+$/', $value);
         }
+    }
+
+    /**
+     * A subscription made through POST /webhooks receives the event payload
+     * as the body, with the type in X-Siren-Event and the delivery id in
+     * X-Siren-Delivery (Siren's WebhookDeliveryService).
+     */
+    public function testConstructEventReadsAFlatPayloadWithItsHeaders(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode(['conversionId' => 501, 'collaboratorId' => 42, 'status' => 'approved'], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'conversion.approved', 'evt_8a3f1b2c');
+
+        $this->assertSame(WebhookEventType::CONVERSION_APPROVED, $event->getType());
+        $this->assertSame(['conversionId' => 501, 'collaboratorId' => 42, 'status' => 'approved'], $event->getData());
+        $this->assertSame('evt_8a3f1b2c', $event->getDeliveryId());
+    }
+
+    /** A flat payload may hold its own `type` field, such as currency.created. */
+    public function testAFlatPayloadWithATypeFieldKeepsTheHeaderType(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode(['code' => 'PTS', 'type' => 'points'], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'currency.created', 'evt_1');
+
+        $this->assertSame(WebhookEventType::CURRENCY_CREATED, $event->getType());
+        $this->assertSame(['code' => 'PTS', 'type' => 'points'], $event->getData());
+    }
+
+    public function testConstructEventFromHeadersReadsAllThreeHeaders(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode(['payoutId' => 9], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEventFromHeaders($body, [
+            'content-type' => 'application/json',
+            'x-siren-signature' => self::sign($body),
+            'X-Siren-Event' => ['payout.paid'],
+            'X-SIREN-DELIVERY' => 'evt_42',
+        ], self::SECRET);
+
+        $this->assertSame(WebhookEventType::PAYOUT_PAID, $event->getType());
+        $this->assertSame(['payoutId' => 9], $event->getData());
+        $this->assertSame('evt_42', $event->getDeliveryId());
+        $this->assertSame(['payoutId' => 9], $event->getBody());
+    }
+
+    public function testConstructEventFromHeadersRejectsAMissingSignature(): void
+    {
+        $siren = $this->mockSiren([]);
+
+        $this->expectException(SignatureVerificationException::class);
+
+        $siren->webhooks->constructEventFromHeaders('{}', ['X-Siren-Event' => 'sale.created'], self::SECRET);
+    }
+
+    /** A connected site's Property-bound subscription receives an envelope. */
+    public function testConstructEventReadsAPropertyEnvelope(): void
+    {
+        $siren = $this->mockSiren([]);
+        $envelope = [
+            'version' => 1,
+            'id' => 'evt_envelope',
+            'type' => 'sale.created',
+            'kind' => 'store',
+            'occurredAt' => '2026-10-18T12:00:00+00:00',
+            'propertyId' => 5,
+            'match' => 'origin',
+            'originPropertyId' => 5,
+            'data' => ['transactionId' => 77],
+            'records' => ['transaction' => ['id' => 77]],
+            'recordDetail' => 'full',
+            'omittedRecords' => [],
+            'recordsTruncated' => false,
+        ];
+        $body = json_encode($envelope, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'sale.created', 'evt_envelope');
+
+        $this->assertSame(WebhookEventType::SALE_CREATED, $event->getType());
+        $this->assertSame(['transactionId' => 77], $event->getData());
+        $this->assertSame('evt_envelope', $event->getDeliveryId());
+        $this->assertSame(5, $event->getBody()['propertyId']);
+    }
+
+    public function testSubscriptionEventsReadsTheCatalog(): void
+    {
+        $catalog = [
+            ['event' => 'sale.created', 'category' => 'Sales', 'label' => 'A sale was recorded'],
+            ['event' => 'program.created', 'category' => 'Programs', 'label' => 'A program was created'],
+        ];
+        $siren = $this->mockSiren([self::jsonResponse(200, $catalog)]);
+
+        $this->assertSame($catalog, $siren->webhooks->subscriptions->events());
+        $this->assertSame('GET', $this->lastRequest()->getMethod());
+        $this->assertSame('https://api.sirenaffiliates.com/siren/v1/webhooks/events', (string) $this->lastRequest()->getUri());
     }
 }

@@ -7,6 +7,10 @@ namespace Siren\Sdk;
 /**
  * Every subscribable webhook event type.
  *
+ * This is the set Siren's `GET /webhooks/events` catalog serves. Siren may
+ * add an event before this list does, so read the catalog with
+ * `$siren->webhooks->subscriptions->events()` when you need the live set.
+ *
  * Use these constants when creating subscriptions or dispatching on
  * `WebhookEvent::getType()` — they give you autocomplete and typo protection.
  * `WebhookEventType::ALL` (`*`) subscribes to every event.
@@ -18,7 +22,9 @@ final class WebhookEventType
 
     public const ALLOCATION_COMPLETED = 'allocation.completed';
     public const COLLABORATOR_CREATED = 'collaborator.created';
+    public const COLLABORATOR_DEACTIVATED = 'collaborator.deactivated';
     public const COLLABORATOR_REGISTERED = 'collaborator.registered';
+    public const COLLABORATOR_UPDATED = 'collaborator.updated';
     public const CONVERSION_APPROVED = 'conversion.approved';
     public const CONVERSION_CREATED = 'conversion.created';
     public const CONVERSION_REJECTED = 'conversion.rejected';
@@ -42,6 +48,7 @@ final class WebhookEventType
     public const OPPORTUNITY_INVALIDATED = 'opportunity.invalidated';
     public const PAYOUT_CREATED = 'payout.created';
     public const PAYOUT_PAID = 'payout.paid';
+    public const PROGRAM_CREATED = 'program.created';
     public const REFUND_CREATED = 'refund.created';
     public const RENEWAL_CREATED = 'renewal.created';
     public const SALE_CREATED = 'sale.created';

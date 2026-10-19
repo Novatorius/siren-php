@@ -64,7 +64,9 @@ class Conversions extends ListResource
     }
 
     /**
-     * Updates a conversion with `PUT /conversions/{id}`.
+     * Updates a conversion with `PUT /conversions/{id}`. Siren answers 200
+     * with no body, so this returns an empty array. Read the conversion
+     * again with {@see retrieve()} to see the result.
      *
      * @param array<string, mixed> $params
      *

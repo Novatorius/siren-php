@@ -35,6 +35,9 @@ final class ProgramEnrollments
     /**
      * The programs a collaborator is enrolled in, each `{id, name}`.
      *
+     * A connected site's token cannot use this: Siren Cloud refuses the
+     * computed field it reads with a 403. A site uses {@see list()}.
+     *
      * @return list<array<string, mixed>>
      */
     public function programsFor(int $collaboratorId): array

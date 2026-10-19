@@ -31,6 +31,10 @@ class Transactions extends ListResource
      * `detailCount`, `totalValue`, `totalQuantity`, or `currency` through
      * `fields`, or send `include=extended` for the summary fields.
      *
+     * A connected site may ask only for `id`, `status`, `dateCreated` and
+     * `details`, and may not send `include`. Siren Cloud refuses the rest
+     * with a 403.
+     *
      * @param array<string, mixed> $params
      */
     public function list(array $params = []): ListResult

@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `EventResult` now carries what Siren reports about an ingested event:
+  `getHttpStatus()`, `getStatus()`, `isQueued()`, `isAttributed()`,
+  `getReason()`, `getMessage()`, `getTransactionId()`, `getConversions()`
+  and `toArray()`. `EventStatus` names the statuses and reasons. A sale
+  answers `created`, `recorded`, `duplicate`, `unattributed` or `ignored`,
+  and a site visit answers `attributed`, `recorded` or `not_attributed`.
+- `EventResult::isQueued()` reports the 202 Siren sends when the
+  organization's engine is paused and it queues the event instead of
+  refusing it. A queued visit's opportunity id is read from the body when
+  the `X-Siren-OID` header is absent.
+- `Webhooks::constructEventFromHeaders()`, which reads `X-Siren-Signature`,
+  `X-Siren-Event` and `X-Siren-Delivery` from the request headers, and
+  `WebhookEvent::getBody()`.
+- `webhooks->subscriptions->events()` reads the live catalog from
+  `GET /webhooks/events`.
+- `WebhookEventType::COLLABORATOR_UPDATED`, `COLLABORATOR_DEACTIVATED` and
+  `PROGRAM_CREATED`, which Siren now delivers.
+- `ApiKeyScope`, the scopes an API key may hold, and `apiKeys->scopes()`
+  for `GET /api-keys/scopes`. `apiKeys->list()` takes `number` and `offset`.
+- `ObligationStatus::DRAFT`, `APPROVED`, `REJECTED` and `DELETED`, which
+  Siren uses. `FULFILLED` stays for compatibility and is documented as
+  retired, because Siren no longer accepts it.
+- `ListResource::MAX_BULK_IDS`. A bulk action with more than 500 ids is
+  refused before it is sent, as Siren refuses it with a 400.
+- `ErrorCode` knows the codes Siren Cloud added: `collaborator_not_on_site`,
+  `site_filter_required` and `report_not_allowed`, which raise a
+  `PolicyException`, `migration_closed`, which stays a plain
+  `PermissionException`, `reserved_address` (422) and `plan_unavailable`
+  (503).
+
+### Changed
+
+- `apiKeys->create()` requires `scopes` and no longer requires `label`,
+  as Siren does. Siren answers 400 to a key without scopes and to a record
+  scope such as `programs:read`, because an API key only sends events.
+- The README and `openapi.yaml` say which credential each call takes. Siren
+  Cloud accepts an API key on the event routes only. API keys and webhook
+  subscriptions are managed with a signed-in dashboard session's token, and
+  the record routes take that or a connected site's token.
+- `collaborators->updateDetails()` sends only `fullName`, `nickname` and
+  custom `fields`. Siren Cloud now refuses `trackingId` and every other
+  field from a connected site with a 403, so the SDK refuses them before
+  sending. A site changes codes through `aliases->create()` and
+  `aliases->free()`.
+- Docblocks, the README and `openapi.yaml` describe what Siren Cloud now
+  holds a connected site to: the fields it may read, the filters
+  opportunity and payout lists need, the held record a create returns for
+  someone the organization already has, the `held` amount on credit
+  balances, the `platformId` length after Cloud adds the Property, and the
+  empty body `conversions->update()` returns.
+- `openapi.yaml` lists the obligation and payout filters, answers 204 for
+  group deletes, and says a page size above 200 is lowered to 200.
+- `HoldLimitException` and `ErrorCode::HOLD_LIMIT` are documented as
+  retired. Siren no longer caps credit holds, so it never sends `hold_limit`.
+
+### Fixed
+
+- `constructEvent()` read the event type and delivery id from the body, but
+  a subscription made with `subscriptions->create()` receives the flat event
+  payload, with the type in `X-Siren-Event` and the delivery id in
+  `X-Siren-Delivery`. Such events came back with an empty type and empty
+  data. `constructEvent()` now takes the two header values as optional
+  arguments and returns the payload as the data. An envelope with its own
+  `type` and `data`, as a connected site's subscription receives, is read
+  as before.
+- The `sale()` docblock and `openapi.yaml` said a sale without `currency`
+  defaults to USD. Siren records it in the organization's default currency.
+- `openapi.yaml` described event validation failures as 422. Siren answers
+  400 with `error.context.failedValidations`, which `BadRequestException`
+  reads.
+
 ## [0.2.0] - 2026-10-17
 
 ### Added

@@ -18,8 +18,8 @@ This SDK is the official PHP client for the Siren API. It lets you:
 
 - Record commerce and tracking events (`sale`, `refund`, `siteVisited`, and custom event types)
 - Verify signed webhooks in a single, constant-time call
-- Manage API keys and webhook subscriptions
-- Reconcile Siren's ledger (conversions, transactions, obligations, payouts) against your own
+- Manage API keys and webhook subscriptions, with a signed-in dashboard session's token
+- Reconcile Siren's ledger (conversions, transactions, obligations, payouts) against your own, with a dashboard session's or a connected site's token
 - Read and write the records a connector needs: collaborators and their tracking codes and program enrollments, mappings, programs, program groups, opportunities, transactions, conversions, engagements, distributors, custom currencies, store credit and its holds, shared settings, and collaborator groups
 - Run inside any host: bring your own HTTP client and your own OAuth access token
 
@@ -43,7 +43,8 @@ composer require siren/sdk
 
 ### Record a sale
 
-Mint an API key in the Siren dashboard (Settings → API Keys), then:
+Mint an API key in the Siren dashboard (Settings → API Keys) with the
+`event:*` scope, then:
 
 ```php
 use Siren\Sdk\Siren;
@@ -55,14 +56,20 @@ $result = $siren->events->sale([
     'externalId' => 'cs_test_a1b2c3',    // your order id — used to match refunds later
     'total'      => 49.99,               // major units: 49.99 = $49.99
     'trackingId' => 4021,                // opportunity id from the Siren tracking cookie
-    'currency'   => 'USD',               // optional, defaults to USD
+    'currency'   => 'USD',               // optional, defaults to the organization's currency
     'items'      => [                    // optional; omit to treat total as one line
         ['name' => 'Pro Plan (annual)', 'amount' => 49.99, 'quantity' => 1],
     ],
 ]);
 
 echo $result->getOpportunityId(); // read from the X-Siren-OID response header
+echo $result->getStatus();        // EventStatus::CREATED, RECORDED, DUPLICATE, UNATTRIBUTED or IGNORED
 ```
+
+Siren answers 202 instead of 200 when the organization's engine is paused,
+such as when it is over its usage threshold. The event is queued and runs
+once the engine resumes, so `$result->isQueued()` is true and the event must
+not be sent again.
 
 Refunds reverse a sale by `(externalId, source)`:
 
@@ -77,7 +84,9 @@ $siren->events->refund([
 
 Siren signs every delivery with `X-Siren-Signature: sha256=<hex hmac>` — an
 HMAC-SHA256 of the **raw request body** keyed by your subscription's signing
-secret.
+secret. The body is the event's payload. Siren names the event in the
+`X-Siren-Event` header and the delivery in `X-Siren-Delivery`, which stays
+the same when a delivery is retried.
 
 > ⚠️ **Pass the raw body bytes.** The HMAC is computed over the exact bytes
 > Siren sent. Read `php://input` directly — if you `json_decode` and re-encode
@@ -90,11 +99,12 @@ use Siren\Sdk\Exception\SignatureVerificationException;
 
 $siren = new Siren(['apiKey' => 'sk_live_...']);
 
-$rawBody   = file_get_contents('php://input');
-$signature = $_SERVER['HTTP_X_SIREN_SIGNATURE'] ?? null;
-
 try {
-    $event = $siren->webhooks->constructEvent($rawBody, $signature, $signingSecret);
+    $event = $siren->webhooks->constructEventFromHeaders(
+        file_get_contents('php://input'),
+        getallheaders(),
+        $signingSecret,
+    );
 } catch (SignatureVerificationException $e) {
     http_response_code(400);
     exit;
@@ -107,9 +117,17 @@ match ($event->getType()) {
 };
 ```
 
-Create a subscription (the `signingSecret` is returned **once** — store it):
+`constructEvent($rawBody, $signature, $secret, $eventType, $deliveryId)`
+does the same with the three header values passed one by one. Leave out
+`$eventType` and a payload event's `getType()` is empty.
+
+Create a subscription (the `signingSecret` is returned **once** — store it).
+Subscriptions and API keys are managed with a signed-in dashboard session's
+access token. Siren Cloud accepts an API key on the event routes only:
 
 ```php
+$siren = new Siren(['accessToken' => $dashboardAccessToken]);
+
 $subscription = $siren->webhooks->subscriptions->create([
     'targetUrl' => 'https://example.com/webhooks/siren',
     'events'    => [WebhookEventType::CONVERSION_APPROVED, WebhookEventType::PAYOUT_PAID],
@@ -117,20 +135,43 @@ $subscription = $siren->webhooks->subscriptions->create([
 ]);
 
 $secret = $subscription['signingSecret'];
+
+$siren->webhooks->subscriptions->events(); // the live catalog: [{event, category, label}, ...]
+```
+
+### Which credential does each call need?
+
+| Calls | Credential |
+|-------|------------|
+| `events` | An API key holding the event's scope (`event:*`, or `event:{slug}`). A connected site's token sends only the events its integrations forward and `site-visited`. |
+| `apiKeys`, `webhooks->subscriptions` | A signed-in dashboard session's access token. |
+| Record resources, including `conversions`, `transactions`, `obligations` and `payouts` | A dashboard session's access token, or a connected site's token on the routes Siren Cloud opens to connectors. See [Connected sites](#connected-sites). |
+
+Siren Cloud refuses an API key on every route but event ingestion, so a key
+cannot read records or manage keys and subscriptions. A new key may hold
+event scopes only. `ApiKeyScope` names them:
+
+```php
+use Siren\Sdk\ApiKeyScope;
+
+$key = $siren->apiKeys->create([
+    'label'  => 'Production server',
+    'scopes' => [ApiKeyScope::ALL_EVENTS],
+]);
 ```
 
 ## Features
 
-- **Event ingestion** — `sale`, `refund`, `siteVisited`, and custom event types via `ingest`.
-- **Webhook verification** — one-call `constructEvent`, plus a lower-level constant-time `verifySignature` boolean check.
-- **Subscription management** — create, list, and delete webhook subscriptions.
-- **API key management** — create, list, and revoke keys.
+- **Event ingestion** — `sale`, `refund`, `siteVisited`, and custom event types via `ingest`, with what Siren recorded (`EventStatus`) and whether it queued the event.
+- **Webhook verification** — one-call `constructEventFromHeaders` or `constructEvent`, plus a lower-level constant-time `verifySignature` boolean check.
+- **Subscription management** — create, list, and delete webhook subscriptions, and read the event catalog.
+- **API key management** — create, list, and revoke keys, and read the scopes a key may hold.
 - **Reconciliation readers** — paginated iterators over conversions, transactions, obligations, and payouts.
 - **Record resources**: collaborators (with tracking codes and program enrollments), mappings, settings, programs, program groups, opportunities, transactions and their details, conversions, engagements, distributors, custom currencies, store credit, and collaborator groups. See [Records](#records).
 - **Host-supplied HTTP and tokens**: plug in your platform's HTTP client and an OAuth access token that refreshes after a 401. See [Connecting a host](#connecting-a-host).
 - **Automatic retries** — network errors, 429s, and 5xx are retried with exponential backoff on idempotent operations; management writes are never auto-retried.
 - **Typed exceptions** — every error extends `Siren\Sdk\Exception\SirenException` and carries the status code, error code, and error data.
-- **Typed taxonomy** — Siren's domain vocabulary as constants, so no magic strings cross the boundary: `WebhookEventType`, `EventSlug`, and the status vocabularies (`ConversionStatus`, `TransactionStatus`, `ObligationStatus`, `PayoutStatus`, `FulfillmentStatus`, `OpportunityStatus`, `ApiKeyStatus`, `WebhookSubscriptionStatus`, `CollaboratorStatus`, `ProgramStatus`, `DistributorStatus`), plus `ProgramGroupSorter`, `CustomCurrencyType`, and a `BULK_*` constant for every bulk action.
+- **Typed taxonomy** — Siren's domain vocabulary as constants, so no magic strings cross the boundary: `WebhookEventType`, `EventSlug`, and the status vocabularies (`ConversionStatus`, `TransactionStatus`, `ObligationStatus`, `PayoutStatus`, `FulfillmentStatus`, `OpportunityStatus`, `ApiKeyStatus`, `WebhookSubscriptionStatus`, `CollaboratorStatus`, `ProgramStatus`, `DistributorStatus`), `EventStatus`, `ApiKeyScope`, plus `ProgramGroupSorter`, `CustomCurrencyType`, and a `BULK_*` constant for every bulk action.
 
 ```php
 use Siren\Sdk\ConversionStatus;
@@ -166,7 +207,7 @@ Every exception extends `Siren\Sdk\Exception\SirenException` and carries
 | 404             | `NotFoundException`                        |
 | 409             | `ConflictException`, or `CodeConflictException` and `HoldConflictException` (`getReason()`) from the calls that raise them |
 | 422             | `ValidationException`, `getFieldErrors()`  |
-| 429             | `RateLimitException` with `getRetryAfter()`, or `HoldLimitException` from `placeHold()` |
+| 429             | `RateLimitException` with `getRetryAfter()` |
 | 5xx / other     | `ApiException`                             |
 | network/timeout | `ConnectionException`                      |
 
@@ -363,7 +404,7 @@ use Siren\Sdk\Resources\Mappings;
 
 // Collaborators are created pending, with no program, distributor or group lists.
 $ada = $siren->collaborators->createPending(['fullName' => 'Ada', 'nickname' => 'ada', 'email' => 'ada@example.com']);
-$siren->collaborators->updateDetails($ada['id'], ['nickname' => 'countess']);   // never status, email or bindings
+$siren->collaborators->updateDetails($ada['id'], ['nickname' => 'countess']);   // fullName, nickname and custom fields only
 $siren->collaborators->enrollments->add($ada['id'], 12);                        // programs that run on this site only
 
 // Codes and mappings, by plain type.
@@ -402,6 +443,18 @@ every platform and sends the type it is given, so the WordPress host
 translates its `user` to `wordpress_user` at its own boundary. A missed
 translation fails loudly with a `PolicyException`.
 
+A site reads only the fields its datastores need: computed fields such as
+a collaborator's `aliases`, `programs` or `creditBalances`, and `include`,
+get a 403. It lists opportunities by `collaboratorId` or `id`, and payouts
+by `id`, `collaboratorId` or `fulfillmentId`. Other lists of those get a
+403 with `ErrorCode::SITE_FILTER_REQUIRED`.
+
+When a site creates someone the organization already has and the site does
+not, Cloud answers with a held record for the site, not the existing
+collaborator. The held record is `pending` with no tracking code, and Cloud
+emails the person to confirm. Once they confirm, Cloud merges it into their
+collaborator and deletes it, so look the collaborator up again by email.
+
 Opportunities, transactions, engagements, conversions, obligations, payouts
 and the credit ledger are read only for a site. They reach Cloud as events.
 A credit hold lapses at its `ttl`, placing again for the same session
@@ -430,7 +483,6 @@ with no code, from an older Cloud deployment, is read by its wording.
 | `PolicyException` | Cloud's rules refuse this request, such as a field in `getParam()` a site may not send or a program that does not run on the site. | Do not repeat it. |
 | `CodeConflictException` | Someone holds the code under that type, possibly another site. | Free it first, or choose another. |
 | `HoldConflictException` | `getReason()` is `no_credit` (nothing available) or `token_in_use` (another site's checkout used the token). | Apply no credit, or mint a new token. |
-| `HoldLimitException` | The collaborator already holds credit for ten live checkouts on this site. | Check out without credit. |
 | `RateLimitException` | The site spent its request budget. `getRetryAfter()` says how long to wait. | Back off. |
 
 A page or a checkout should never wait on a slow Siren. Give the client it

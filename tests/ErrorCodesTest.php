@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk\Tests;
 
 use Siren\Sdk\Auth\CallbackAccessTokenSource;
+use Siren\Sdk\Exception\ApiException;
 use Siren\Sdk\Exception\ErrorCode;
 use Siren\Sdk\Exception\HoldConflictException;
 use Siren\Sdk\Exception\HoldLimitException;
@@ -13,6 +14,7 @@ use Siren\Sdk\Exception\PermissionException;
 use Siren\Sdk\Exception\PolicyException;
 use Siren\Sdk\Exception\RateLimitException;
 use Siren\Sdk\Exception\SiteDisconnectedException;
+use Siren\Sdk\Exception\ValidationException;
 
 /**
  * Siren Cloud names each refusal of a connected site with a stable
@@ -36,6 +38,10 @@ final class ErrorCodesTest extends TestCase
             'PENDING_STATUS_REQUIRED' => 'pending_status_required',
             'USER_TYPE_NOT_ALLOWED' => 'user_type_not_allowed',
             'PROGRAM_NOT_ON_SITE' => 'program_not_on_site',
+            'COLLABORATOR_NOT_ON_SITE' => 'collaborator_not_on_site',
+            'SITE_FILTER_REQUIRED' => 'site_filter_required',
+            'REPORT_NOT_ALLOWED' => 'report_not_allowed',
+            'MIGRATION_CLOSED' => 'migration_closed',
             'NOT_PERMITTED' => 'not_permitted',
             'PLAN_REQUIRED' => 'plan_required',
             'ADMIN_REQUIRED' => 'admin_required',
@@ -43,6 +49,8 @@ final class ErrorCodesTest extends TestCase
             'MAPPING_EXISTS' => 'mapping_exists',
             'HOLD_NO_CREDIT' => 'hold_no_credit',
             'HOLD_TOKEN_IN_USE' => 'hold_token_in_use',
+            'RESERVED_ADDRESS' => 'reserved_address',
+            'PLAN_UNAVAILABLE' => 'plan_unavailable',
             'HOLD_LIMIT' => 'hold_limit',
         ], array_filter((new \ReflectionClass(ErrorCode::class))->getConstants(), 'is_string'));
     }
@@ -133,6 +141,7 @@ final class ErrorCodesTest extends TestCase
             'a plan refusal' => [ErrorCode::PLAN_REQUIRED, 'Your plan does not include this feature.'],
             'a plan refusal worded like a policy refusal' => [ErrorCode::PLAN_REQUIRED, "You don't have permission to do that."],
             'an admin-only refusal' => [ErrorCode::ADMIN_REQUIRED, 'This action requires an organization admin.'],
+            'a closed migration, worded like a policy refusal' => [ErrorCode::MIGRATION_CLOSED, 'A connected site may not migrate now.'],
         ];
     }
 
@@ -154,10 +163,38 @@ final class ErrorCodesTest extends TestCase
         }
     }
 
+    /** Siren's ApiErrorCode::RESERVED_ADDRESS answers 422. */
+    public function testAReservedAddressIsAValidationExceptionWithItsCode(): void
+    {
+        $siren = $this->hostSiren([self::coded(422, 'That address is reserved.', ErrorCode::RESERVED_ADDRESS)]);
+
+        try {
+            $siren->collaborators->create(['fullName' => 'Ada', 'nickname' => 'ada', 'email' => 'ada@example.com']);
+            $this->fail('Expected a ValidationException.');
+        } catch (ValidationException $e) {
+            $this->assertSame(ErrorCode::RESERVED_ADDRESS, $e->getErrorCode());
+        }
+    }
+
+    /** Siren's ApiErrorCode::PLAN_UNAVAILABLE answers 503. */
+    public function testAnUnavailablePlanIsAnApiExceptionWithItsCode(): void
+    {
+        $siren = $this->hostSiren([self::coded(503, 'The plan could not be read.', ErrorCode::PLAN_UNAVAILABLE)], ['maxRetries' => 0]);
+
+        try {
+            $siren->collaborators->list();
+            $this->fail('Expected an ApiException.');
+        } catch (ApiException $e) {
+            $this->assertSame(503, $e->getStatusCode());
+            $this->assertSame(ErrorCode::PLAN_UNAVAILABLE, $e->getErrorCode());
+        }
+    }
+
     public function testNoPlanOrAdminCodeIsAPolicyCode(): void
     {
         $this->assertNotContains(ErrorCode::PLAN_REQUIRED, ErrorCode::POLICY);
         $this->assertNotContains(ErrorCode::ADMIN_REQUIRED, ErrorCode::POLICY);
+        $this->assertNotContains(ErrorCode::MIGRATION_CLOSED, ErrorCode::POLICY);
     }
 
     public function testASiteDisconnectedCodeIsASiteDisconnectedExceptionWhateverTheMessage(): void
