@@ -22,8 +22,11 @@ existing callers. Each one follows a rule Siren already enforces.
   `getData()`, and throws `SignatureVerificationException` when `$eventType`
   is not passed. The three-argument call from 0.2.0 used to return an event
   with an empty type for every bare payload, which no handler matched. Pass
-  the `X-Siren-Event` header, or call `constructEventFromHeaders()`. An
-  envelope is now known by its `version` field.
+  the `X-Siren-Event` header, or call `constructEventFromHeaders()`. A body
+  is read as a connected site's envelope only when its `id` and `type`
+  match the `X-Siren-Delivery` and `X-Siren-Event` values, or when neither
+  header is passed, so a custom event's payload that holds `version`,
+  `type` and `data` keys stays whole.
 
 ### Added
 

@@ -68,8 +68,8 @@ final class WebhooksTest extends TestCase
     }
 
     /**
-     * Only an envelope carries `version`. A flat payload with its own `type`
-     * and `data` keys is still the payload, and still needs the header.
+     * A flat payload with its own `type` and `data` keys is still the
+     * payload, and still needs the header.
      */
     public function testAFlatBodyWithTypeAndDataKeysIsNotAnEnvelope(): void
     {
@@ -103,6 +103,76 @@ final class WebhooksTest extends TestCase
         $this->assertSame('webhook.test', $event->getType());
         $this->assertSame(['nonce' => 'abc'], $event->getData());
         $this->assertSame('evt_test', $event->getDeliveryId());
+    }
+
+    /**
+     * A custom event's payload is whatever the sender posted, so it can look
+     * like an envelope. Delivered to an ordinary subscription, its `id` is
+     * not the delivery id in X-Siren-Delivery, so the SDK keeps the whole
+     * body and the header's event type.
+     */
+    public function testACustomPayloadShapedLikeAnEnvelopeIsNotUnwrapped(): void
+    {
+        $siren = $this->mockSiren([]);
+        $payload = [
+            'version' => 2,
+            'id' => 'order-81',
+            'type' => 'subscription',
+            'data' => ['plan' => 'pro'],
+        ];
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEventFromHeaders($body, [
+            'X-Siren-Signature' => self::sign($body),
+            'X-Siren-Event' => 'plan.renewed',
+            'X-Siren-Delivery' => 'evt_0f3a',
+        ], self::SECRET);
+
+        $this->assertSame('plan.renewed', $event->getType());
+        $this->assertSame($payload, $event->getData());
+        $this->assertSame('evt_0f3a', $event->getDeliveryId());
+    }
+
+    /** The same holds for a payload of just `version`, `type` and `data`. */
+    public function testAVersionTypeDataPayloadIsNotUnwrapped(): void
+    {
+        $siren = $this->mockSiren([]);
+        $payload = ['version' => 1, 'type' => 'refund', 'data' => ['orderId' => 9]];
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'order.synced', 'evt_77');
+
+        $this->assertSame('order.synced', $event->getType());
+        $this->assertSame($payload, $event->getData());
+    }
+
+    /**
+     * With X-Siren-Event and no X-Siren-Delivery there is no delivery id to
+     * match, so even an envelope-shaped body stays whole.
+     */
+    public function testAnEnvelopeShapeWithoutTheDeliveryHeaderIsNotUnwrapped(): void
+    {
+        $siren = $this->mockSiren([]);
+        $payload = ['version' => 1, 'id' => 'evt_1', 'type' => 'sale.created', 'data' => ['transactionId' => 1]];
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'sale.created');
+
+        $this->assertSame($payload, $event->getData());
+        $this->assertNull($event->getDeliveryId());
+    }
+
+    /** An envelope whose type differs from X-Siren-Event is not Siren's envelope. */
+    public function testAnEnvelopeWhoseTypeDiffersFromTheHeaderIsNotUnwrapped(): void
+    {
+        $siren = $this->mockSiren([]);
+        $payload = ['version' => 1, 'id' => 'evt_5', 'type' => 'refund', 'data' => ['orderId' => 9]];
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'order.synced', 'evt_5');
+
+        $this->assertSame('order.synced', $event->getType());
+        $this->assertSame($payload, $event->getData());
     }
 
     public function testConstructEventRejectsATamperedBody(): void

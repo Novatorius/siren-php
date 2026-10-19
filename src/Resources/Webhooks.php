@@ -45,9 +45,17 @@ final class Webhooks
      * `X-Siren-Event` header and the delivery in `X-Siren-Delivery`. Pass
      * those two headers as `$eventType` and `$deliveryId`, or use
      * {@see constructEventFromHeaders()}, which reads all three. Such a
-     * delivery without `$eventType` is refused. A connected site's
-     * subscription receives an envelope that names its own type, data and
-     * id, and is read from the body.
+     * delivery without `$eventType` is refused.
+     *
+     * A connected site's subscription receives an envelope,
+     * `{version, id, type, data, records, ...}`, and Siren sends it with the
+     * same headers. The envelope's `id` is the delivery id from
+     * `X-Siren-Delivery` and its `type` is the `X-Siren-Event` value, and
+     * that match is how an envelope is told apart from a payload that
+     * happens to hold `version`, `type` and `data` keys of its own. When
+     * either header is passed, a body is read as an envelope only when its
+     * `id` equals `$deliveryId` and its `type` equals `$eventType`. Called
+     * with neither header, a body shaped like an envelope is read as one.
      *
      * @throws SignatureVerificationException when the signature is missing,
      *         malformed, or does not match the body, when the body is not
@@ -82,19 +90,11 @@ final class Webhooks
         $eventType = self::nonEmpty($eventType);
         $deliveryId = self::nonEmpty($deliveryId);
 
-        // An envelope names its own type and wraps the payload in `data`. A
-        // connected site's subscription gets one, with the delivery id in
-        // `id`. Every other subscription gets the flat payload, with the type
-        // and delivery id in headers. The envelope is known by its `version`,
-        // because a flat payload may carry a `type` of its own, as
-        // `currency.created` does.
-        if (self::isEnvelope($decoded)) {
-            $envelopeId = $decoded['id'] ?? null;
-
+        if (self::isEnvelope($decoded, $eventType, $deliveryId)) {
             return new WebhookEvent(
                 type: $decoded['type'],
                 data: $decoded['data'],
-                deliveryId: is_string($envelopeId) && $envelopeId !== '' ? $envelopeId : $deliveryId,
+                deliveryId: $decoded['id'],
                 body: $decoded,
             );
         }
@@ -176,14 +176,36 @@ final class Webhooks
      * Whether a body is the versioned envelope a connected site's
      * subscription receives: `{version, id, type, data, records, ...}`.
      *
+     * Siren sends an envelope and a plain payload with the same headers, and
+     * a plain payload, such as a custom event's, may hold `version`, `type`
+     * and `data` keys of its own. What only an envelope carries is its own
+     * delivery id: Siren writes the `X-Siren-Delivery` value into the
+     * envelope's `id` and the `X-Siren-Event` value into its `type`. So when
+     * the caller passes either header, the body must match them. Without
+     * either header the shape alone decides.
+     *
      * @param array<int|string, mixed> $decoded
      */
-    private static function isEnvelope(array $decoded): bool
+    private static function isEnvelope(array $decoded, ?string $eventType, ?string $deliveryId): bool
     {
-        return is_int($decoded['version'] ?? null)
+        $shaped = is_int($decoded['version'] ?? null)
+            && is_string($decoded['id'] ?? null)
+            && $decoded['id'] !== ''
             && is_string($decoded['type'] ?? null)
             && $decoded['type'] !== ''
             && is_array($decoded['data'] ?? null);
+
+        if (!$shaped) {
+            return false;
+        }
+
+        if ($eventType === null && $deliveryId === null) {
+            return true;
+        }
+
+        return $deliveryId !== null
+            && $decoded['id'] === $deliveryId
+            && ($eventType === null || $decoded['type'] === $eventType);
     }
 
     private static function nonEmpty(?string $value): ?string
