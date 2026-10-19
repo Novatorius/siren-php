@@ -6,7 +6,7 @@ namespace Siren\Sdk\Exception;
 
 /**
  * The machine-readable `error.code` Siren Cloud sends when it refuses a
- * connected site's request, as in
+ * connected site's or an API key's request, as in
  * `{"error": {"message": "...", "code": "hold_no_credit", "context": {}}}`.
  *
  * The SDK picks the exception from the code first. The message is for
@@ -20,8 +20,26 @@ final class ErrorCode
     /** 401: the organization revoked or deleted the site's connection. */
     public const SITE_DISCONNECTED = 'site_disconnected';
 
-    /** 403: the token lacks the scope the route needs. `error.context.scope` names it. */
+    /**
+     * 403: the token or API key lacks the scope the route needs.
+     * `error.context.scope` names it, and for an API key
+     * `error.context.anyOf` lists every scope that opens the route.
+     */
     public const MISSING_SCOPE = 'missing_scope';
+
+    /**
+     * 401: the route does not accept an API key, such as every `/api-keys`
+     * route. It takes a signed-in dashboard session. A
+     * {@see ApiKeyNotAcceptedException}.
+     */
+    public const API_KEY_NOT_ACCEPTED = 'api_key_not_accepted';
+
+    /**
+     * 403: an API key bound to one store asked for records that are not kept
+     * by store, such as payouts or webhook subscriptions. An
+     * organization-wide key reads them. A {@see StoreKeyNotAllowedException}.
+     */
+    public const STORE_KEY_NOT_ALLOWED = 'store_key_not_allowed';
 
     /** 403: a site may not send this field here. `error.context.param` names it. */
     public const FIELD_NOT_ALLOWED = 'field_not_allowed';
@@ -134,6 +152,8 @@ final class ErrorCode
     private const ALL = [
         self::SITE_DISCONNECTED,
         self::MISSING_SCOPE,
+        self::API_KEY_NOT_ACCEPTED,
+        self::STORE_KEY_NOT_ALLOWED,
         self::FIELD_NOT_ALLOWED,
         self::PENDING_STATUS_REQUIRED,
         self::USER_TYPE_NOT_ALLOWED,

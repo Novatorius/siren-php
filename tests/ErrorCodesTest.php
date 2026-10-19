@@ -34,6 +34,8 @@ final class ErrorCodesTest extends TestCase
         $this->assertSame([
             'SITE_DISCONNECTED' => 'site_disconnected',
             'MISSING_SCOPE' => 'missing_scope',
+            'API_KEY_NOT_ACCEPTED' => 'api_key_not_accepted',
+            'STORE_KEY_NOT_ALLOWED' => 'store_key_not_allowed',
             'FIELD_NOT_ALLOWED' => 'field_not_allowed',
             'PENDING_STATUS_REQUIRED' => 'pending_status_required',
             'USER_TYPE_NOT_ALLOWED' => 'user_type_not_allowed',

@@ -63,13 +63,19 @@ final class ExceptionFactory
             400 => BadRequestException::class,
             // Each check reads the stable `error.code` first and falls back to
             // the message when the reply has no code this SDK knows.
-            401 => SiteDisconnectedException::matches($message, $code) ? SiteDisconnectedException::class : AuthenticationException::class,
-            // A missing scope, which reconnecting fixes, or a policy refusal,
-            // which it does not. Any other 403 stays a plain
+            401 => match (true) {
+                SiteDisconnectedException::matches($message, $code) => SiteDisconnectedException::class,
+                ApiKeyNotAcceptedException::matches($message, $code) => ApiKeyNotAcceptedException::class,
+                default => AuthenticationException::class,
+            },
+            // A missing scope, which a new token or key fixes, a store-bound
+            // key on records kept by no store, or a policy refusal, which
+            // nothing about the credential fixes. Any other 403 stays a plain
             // PermissionException, such as a plan refusal (`plan_required`)
             // or an admin-only action (`admin_required`).
             403 => match (true) {
                 MissingScopeException::matches($message, $code) => MissingScopeException::class,
+                StoreKeyNotAllowedException::matches($message, $code) => StoreKeyNotAllowedException::class,
                 PolicyException::matches($message, $data, $code) => PolicyException::class,
                 default => PermissionException::class,
             },

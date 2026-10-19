@@ -30,6 +30,35 @@ existing callers. Each one follows a rule Siren already enforces.
 
 ### Added
 
+- An API key reads Siren's ledger and manages webhook subscriptions, as Siren
+  Cloud 3.6.259 allows. `conversions` and `transactions` (`list()` and
+  `retrieve()`), `obligations->list()` and `payouts->list()` take a key that
+  holds the matching ledger scope. `webhooks->subscriptions->list()` and
+  `events()` take a key with `webhook-subscriptions:read` or
+  `webhook-subscriptions:manage`, and `create()` and `delete()` take one with
+  `webhook-subscriptions:manage`. A dashboard session's token still works on
+  all of them.
+- `ApiKeyScope::LEDGER_CONVERSIONS_READ`, `LEDGER_TRANSACTIONS_READ`,
+  `LEDGER_OBLIGATIONS_READ`, `LEDGER_PAYOUTS_READ`,
+  `WEBHOOK_SUBSCRIPTIONS_READ` and `WEBHOOK_SUBSCRIPTIONS_MANAGE`, and
+  `ApiKeyScope::LEDGER_READ`, the four ledger scopes together.
+  `apiKeys->create()` sends them as given. Siren grants each only by its
+  exact name, so `*`, `event:*` and older names such as `conversions:read`
+  grant none of them.
+- `ApiKeyNotAcceptedException`, a 401 `AuthenticationException` for
+  `api_key_not_accepted`, which Siren sends when a route takes a session and
+  not an API key, as every `apiKeys` route does.
+- `StoreKeyNotAllowedException`, a 403 `PermissionException` for
+  `store_key_not_allowed`, which Siren sends when a key bound to one store
+  asks for payouts or webhook subscriptions. `getPropertyId()` names the
+  key's store.
+- `MissingScopeException::getAnyOf()` lists every scope that opens the route,
+  from `error.context.anyOf`.
+- `ErrorCode::API_KEY_NOT_ACCEPTED` and `ErrorCode::STORE_KEY_NOT_ALLOWED`.
+- The ledger readers document the `propertyId` filter, which narrows an
+  organization-wide read to one store. A key bound to one store reads only
+  its own store's rows. `openapi.yaml` lists it, and the `X-Siren-Property`
+  header, on each ledger read.
 - `EventResult` now carries what Siren reports about an ingested event:
   `getHttpStatus()`, `getStatus()`, `isQueued()`, `isAttributed()`,
   `getReason()`, `getMessage()`, `getTransactionId()`, `getConversions()`
@@ -63,12 +92,15 @@ existing callers. Each one follows a rule Siren already enforces.
 ### Changed
 
 - `apiKeys->create()` requires `scopes` and no longer requires `label`,
-  as Siren does. Siren answers 400 to a key without scopes and to a record
-  scope such as `programs:read`, because an API key only sends events.
-- The README and `openapi.yaml` say which credential each call takes. Siren
-  Cloud accepts an API key on the event routes only. API keys and webhook
-  subscriptions are managed with a signed-in dashboard session's token, and
-  the record routes take that or a connected site's token.
+  as Siren does. Siren answers 400 to a key without scopes and to an older
+  resource scope such as `programs:read`.
+- The README and `openapi.yaml` say which credential each call takes. An API
+  key sends events, reads the ledger with a ledger scope, and manages webhook
+  subscriptions with a webhook scope. API keys are managed with a signed-in
+  dashboard session's token. The other record routes take that or a
+  connected site's token. `openapi.yaml` puts the ledger and webhook
+  operations on the `apiKey` scheme with the scopes each one needs, and
+  lists the new error codes.
 - `collaborators->updateDetails()` sends only `fullName` and `nickname`,
   plus `fields` to choose the returned fields. Siren Cloud now refuses `trackingId` and every other
   field from a connected site with a 403, so the SDK refuses them before

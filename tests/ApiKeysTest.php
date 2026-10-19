@@ -6,6 +6,8 @@ namespace Siren\Sdk\Tests;
 
 use Siren\Sdk\ApiKeyScope;
 use Siren\Sdk\Exception\ApiException;
+use Siren\Sdk\Exception\ApiKeyNotAcceptedException;
+use Siren\Sdk\Exception\ErrorCode;
 
 final class ApiKeysTest extends TestCase
 {
@@ -99,6 +101,63 @@ final class ApiKeysTest extends TestCase
             'https://api.sirenaffiliates.com/siren/v1/api-keys?number=50&offset=200',
             (string) $this->lastRequest()->getUri(),
         );
+    }
+
+    public function testCreateSendsTheLedgerAndWebhookScopes(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(201, ['id' => 5, 'rawKey' => 'sk_live_x'])]);
+
+        $siren->apiKeys->create([
+            'label' => 'Accounting export',
+            'scopes' => [...ApiKeyScope::LEDGER_READ, ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ, ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE],
+        ]);
+
+        $this->assertSame([
+            'label' => 'Accounting export',
+            'scopes' => [
+                'ledger:conversions:read',
+                'ledger:transactions:read',
+                'ledger:obligations:read',
+                'ledger:payouts:read',
+                'webhook-subscriptions:read',
+                'webhook-subscriptions:manage',
+            ],
+        ], $this->lastRequestJson());
+    }
+
+    /**
+     * Siren grants these scopes only by their exact names, so the values are
+     * a contract. Changing one would mint keys that open nothing.
+     */
+    public function testTheLedgerAndWebhookScopesAreStable(): void
+    {
+        $this->assertSame('ledger:conversions:read', ApiKeyScope::LEDGER_CONVERSIONS_READ);
+        $this->assertSame('ledger:transactions:read', ApiKeyScope::LEDGER_TRANSACTIONS_READ);
+        $this->assertSame('ledger:obligations:read', ApiKeyScope::LEDGER_OBLIGATIONS_READ);
+        $this->assertSame('ledger:payouts:read', ApiKeyScope::LEDGER_PAYOUTS_READ);
+        $this->assertSame('webhook-subscriptions:read', ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ);
+        $this->assertSame('webhook-subscriptions:manage', ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE);
+        $this->assertSame(
+            [ApiKeyScope::LEDGER_CONVERSIONS_READ, ApiKeyScope::LEDGER_TRANSACTIONS_READ, ApiKeyScope::LEDGER_OBLIGATIONS_READ, ApiKeyScope::LEDGER_PAYOUTS_READ],
+            ApiKeyScope::LEDGER_READ,
+        );
+    }
+
+    public function testAnApiKeyOnAKeyRouteIsAnApiKeyNotAcceptedException(): void
+    {
+        $siren = $this->mockSiren([
+            self::errorResponse(401, 'This route does not accept API keys. Sign in to use it, or see the API key reference for the routes a key can use.', 'api_key_not_accepted'),
+        ]);
+
+        try {
+            $siren->apiKeys->list();
+            $this->fail('Expected an ApiKeyNotAcceptedException.');
+        } catch (ApiKeyNotAcceptedException $e) {
+            $this->assertSame(401, $e->getStatusCode());
+            $this->assertSame(ErrorCode::API_KEY_NOT_ACCEPTED, $e->getErrorCode());
+        }
+
+        $this->assertCount(1, $this->history, 'A key the route does not accept is not sent again.');
     }
 
     public function testEventScopeNeedsASlug(): void

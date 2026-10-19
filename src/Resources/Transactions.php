@@ -11,7 +11,9 @@ use Siren\Sdk\ListResult;
  * Transactions (`/transactions`) and their line-item details.
  *
  * `$siren->transactions->list()` keeps working as the reconciliation reader
- * it was in 0.1.0.
+ * it was in 0.1.0. `list()` and `retrieve()` take an API key that holds
+ * {@see \Siren\Sdk\ApiKeyScope::LEDGER_TRANSACTIONS_READ}, as well as a
+ * dashboard session or a connected site's token.
  */
 class Transactions extends ListResource
 {
@@ -35,6 +37,11 @@ class Transactions extends ListResource
      * `details`, and may not send `include`. Siren Cloud refuses the rest
      * with a 403.
      *
+     * `propertyId` narrows the list to one store's transactions when the
+     * credential reads the whole organization, such as an
+     * organization-wide API key. A key bound to one store reads only its own
+     * store's transactions whatever it sends.
+     *
      * @param array<string, mixed> $params
      */
     public function list(array $params = []): ListResult
@@ -43,7 +50,11 @@ class Transactions extends ListResource
     }
 
     /**
-     * @param array<string, mixed> $params `fields` (such as `['id', 'status', 'details']`) or `include`.
+     * Reads one transaction. A key bound to one store gets a
+     * {@see \Siren\Sdk\Exception\NotFoundException} for another store's
+     * transaction.
+     *
+     * @param array<string, mixed> $params `fields` (such as `['id', 'status', 'details']`), `include`, or `propertyId`.
      *
      * @return array<int|string, mixed>
      */

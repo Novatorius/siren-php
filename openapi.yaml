@@ -20,9 +20,12 @@ info:
     (`POST /event/{eventSlug}`) and `GET /ping` accept an organization API
     key (`Authorization: Bearer sk_live_...`), and a connected site's OAuth
     access token for the events its integrations forward and `site-visited`.
-    An API key works on those routes only. API keys and webhook subscriptions
-    are managed with a signed-in dashboard session. The record routes accept
-    a signed-in dashboard session, and a
+    An API key with a ledger scope also reads conversions, transactions,
+    obligations and payouts, and one with a webhook scope reads and manages
+    webhook subscriptions. Each of those operations lists the scopes that
+    open it. Every other route answers an API key with 401
+    `api_key_not_accepted`. API keys are managed with a signed-in dashboard
+    session. The record routes accept a signed-in dashboard session, and a
     connected site's token on the routes Siren Cloud opens to connectors,
     when the token holds `connect:records:read` for reads or
     `connect:records:write` for writes. Those are explicit scopes, so
@@ -285,7 +288,13 @@ paths:
         Pages with `number` (default 200, and a size above 200 is lowered to
         200) and `offset`. An
         organization holds at most 100 subscriptions.
+
+        An API key needs `webhook-subscriptions:read` or
+        `webhook-subscriptions:manage`, and must be organization-wide. A key
+        bound to one store is refused with 403 `store_key_not_allowed`.
       security:
+        - apiKey: ['webhook-subscriptions:read']
+        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/Number'
@@ -316,7 +325,12 @@ paths:
         The body of each delivery is the event's payload. The `X-Siren-Event`
         header names the event and `X-Siren-Delivery` carries the delivery id.
         Siren answers 400 once the organization holds 100 subscriptions.
+
+        An API key needs `webhook-subscriptions:manage`, and must be
+        organization-wide. A key bound to one store is refused with 403
+        `store_key_not_allowed`.
       security:
+        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       requestBody:
         required: true
@@ -347,7 +361,13 @@ paths:
       description: |
         The live catalog of events Siren delivers, in the order the dashboard
         shows them.
+
+        An API key needs `webhook-subscriptions:read` or
+        `webhook-subscriptions:manage`, and must be organization-wide. A key
+        bound to one store is refused with 403 `store_key_not_allowed`.
       security:
+        - apiKey: ['webhook-subscriptions:read']
+        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       responses:
         '200':
@@ -364,7 +384,13 @@ paths:
       tags: [Webhooks]
       operationId: getWebhookSubscription
       summary: Get a webhook subscription
+      description: |
+        An API key needs `webhook-subscriptions:read` or
+        `webhook-subscriptions:manage`, and must be organization-wide. A key
+        bound to one store is refused with 403 `store_key_not_allowed`.
       security:
+        - apiKey: ['webhook-subscriptions:read']
+        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -375,18 +401,25 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/WebhookSubscription' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
     delete:
       tags: [Webhooks]
       operationId: deleteWebhookSubscription
       summary: Delete a webhook subscription
+      description: |
+        An API key needs `webhook-subscriptions:manage`, and must be
+        organization-wide. A key bound to one store is refused with 403
+        `store_key_not_allowed`.
       security:
+        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         '200': { description: Deleted. }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api-keys:
     get:
@@ -396,6 +429,9 @@ paths:
       description: |
         Pages with `number` (default 200, and a size above 200 is lowered to
         200) and `offset`.
+
+        Takes a signed-in dashboard session. No API key scope reaches this
+        route, and Siren answers an API key with 401 `api_key_not_accepted`.
       security:
         - dashboardSession: []
       parameters:
@@ -421,10 +457,15 @@ paths:
       summary: Create an API key
       description: |
         Creates a new API key. The plaintext `rawKey` (`sk_live_...`) is
-        returned **once** and cannot be retrieved later. A key sends events
-        and does nothing else, so it holds event scopes only. Siren answers
-        400 for a missing or empty `scopes`, for a record scope such as
-        `programs:read`, and once the organization holds 250 active keys.
+        returned **once** and cannot be retrieved later. A key holds event
+        scopes, to send events, and the ledger and webhook scopes, to read
+        conversions, transactions, obligations and payouts and to manage
+        webhook subscriptions. Siren answers 400 for a missing or empty
+        `scopes`, for an older resource scope such as `programs:read` or
+        `conversions:read`, and once the organization holds 250 active keys.
+
+        Takes a signed-in dashboard session. No API key scope reaches this
+        route, and Siren answers an API key with 401 `api_key_not_accepted`.
       security:
         - dashboardSession: []
       requestBody:
@@ -453,11 +494,17 @@ paths:
       tags: [API Keys]
       operationId: listApiKeyScopes
       summary: List the scopes a new key may hold
+      description: |
+        Takes a signed-in dashboard session. No API key scope reaches this
+        route, and Siren answers an API key with 401 `api_key_not_accepted`.
       security:
         - dashboardSession: []
       responses:
         '200':
-          description: The event scopes, grouped under `events`.
+          description: |
+            The scopes a new key may hold: the event scopes under `events`,
+            the ledger read scopes under `ledger`, and the webhook scopes
+            under `webhook-subscriptions`.
           content:
             application/json:
               schema:
@@ -465,19 +512,22 @@ paths:
                 properties:
                   events:
                     type: array
-                    items:
-                      type: object
-                      properties:
-                        scope: { type: string, example: 'event:*' }
-                        resource: { type: string, example: events }
-                        action: { type: string }
-                        label: { type: string }
+                    items: { $ref: '#/components/schemas/ApiKeyScopeEntry' }
+                  ledger:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiKeyScopeEntry' }
+                  webhook-subscriptions:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiKeyScopeEntry' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api-keys/{id}:
     delete:
       tags: [API Keys]
       operationId: revokeApiKey
       summary: Revoke an API key
+      description: |
+        Takes a signed-in dashboard session. No API key scope reaches this
+        route, and Siren answers an API key with 401 `api_key_not_accepted`.
       security:
         - dashboardSession: []
       parameters:
@@ -1041,6 +1091,15 @@ paths:
       description: |
         Ask for `details`, `detailCount`, `totalValue`, `totalQuantity`, or
         `currency` through `fields`.
+
+        An API key needs the `ledger:transactions:read` scope. A key bound to one
+        store reads only its own store's rows. An organization-wide key may
+        narrow the read to one store with `propertyId` or the
+        `X-Siren-Property` header.
+      security:
+        - apiKey: ['ledger:transactions:read']
+        - dashboardSession: []
+        - connectorToken: []
       parameters:
         - { $ref: '#/components/parameters/Number' }
         - { $ref: '#/components/parameters/Offset' }
@@ -1056,10 +1115,13 @@ paths:
           in: query
           schema: { type: string }
           description: Send `extended` for the summary fields when `fields` is not given.
+        - { $ref: '#/components/parameters/PropertyId' }
+        - { $ref: '#/components/parameters/XSirenProperty' }
       responses:
         '200': { $ref: '#/components/responses/PaginatedList' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Transactions]
       operationId: createTransaction
@@ -1095,6 +1157,15 @@ paths:
       summary: Get a transaction
       description: |
         Send `fields=id,details` for the line-item details.
+
+        An API key needs the `ledger:transactions:read` scope. A key bound to one
+        store reads only its own store's rows. An organization-wide key may
+        narrow the read to one store with `propertyId` or the
+        `X-Siren-Property` header.
+      security:
+        - apiKey: ['ledger:transactions:read']
+        - dashboardSession: []
+        - connectorToken: []
       parameters:
         - { $ref: '#/components/parameters/Id' }
         - { $ref: '#/components/parameters/Fields' }
@@ -1102,9 +1173,12 @@ paths:
           in: query
           schema: { type: string }
           description: Send `extended` for the summary fields when `fields` is not given.
+        - { $ref: '#/components/parameters/PropertyId' }
+        - { $ref: '#/components/parameters/XSirenProperty' }
       responses:
         '200': { $ref: '#/components/responses/Record' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /transactions/bulk:
     post:
@@ -1168,6 +1242,15 @@ paths:
       description: |
         `collaboratorId` and `programId` are resolved through the conversion's
         engagement.
+
+        An API key needs the `ledger:conversions:read` scope. A key bound to one
+        store reads only its own store's rows. An organization-wide key may
+        narrow the read to one store with `propertyId` or the
+        `X-Siren-Property` header.
+      security:
+        - apiKey: ['ledger:conversions:read']
+        - dashboardSession: []
+        - connectorToken: []
       parameters:
         - { $ref: '#/components/parameters/Number' }
         - { $ref: '#/components/parameters/Offset' }
@@ -1201,10 +1284,13 @@ paths:
           in: query
           schema: { type: string }
           description: Send `extended` for the summary fields when `fields` is not given.
+        - { $ref: '#/components/parameters/PropertyId' }
+        - { $ref: '#/components/parameters/XSirenProperty' }
       responses:
         '200': { $ref: '#/components/responses/PaginatedList' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Conversions]
       operationId: createConversion
@@ -1237,6 +1323,15 @@ paths:
       tags: [Conversions]
       operationId: getConversion
       summary: Get a conversion
+      description: |
+        An API key needs the `ledger:conversions:read` scope. A key bound to one
+        store reads only its own store's rows. An organization-wide key may
+        narrow the read to one store with `propertyId` or the
+        `X-Siren-Property` header.
+      security:
+        - apiKey: ['ledger:conversions:read']
+        - dashboardSession: []
+        - connectorToken: []
       parameters:
         - { $ref: '#/components/parameters/Id' }
         - { $ref: '#/components/parameters/Fields' }
@@ -1244,9 +1339,12 @@ paths:
           in: query
           schema: { type: string }
           description: Send `extended` for the summary fields when `fields` is not given.
+        - { $ref: '#/components/parameters/PropertyId' }
+        - { $ref: '#/components/parameters/XSirenProperty' }
       responses:
         '200': { $ref: '#/components/responses/Record' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [Conversions]
@@ -2273,6 +2371,15 @@ paths:
       tags: [Reconciliation]
       operationId: listObligations
       summary: List obligations
+      description: |
+        An API key needs the `ledger:obligations:read` scope. A key bound to one
+        store reads only its own store's rows. An organization-wide key may
+        narrow the read to one store with `propertyId` or the
+        `X-Siren-Property` header.
+      security:
+        - apiKey: ['ledger:obligations:read']
+        - dashboardSession: []
+        - connectorToken: []
       parameters:
         - { $ref: '#/components/parameters/Number' }
         - { $ref: '#/components/parameters/Offset' }
@@ -2286,10 +2393,13 @@ paths:
         - { name: awardType, in: query, schema: { type: string } }
         - { name: payoutId, in: query, schema: { type: integer } }
         - { name: opportunityId, in: query, schema: { type: integer } }
+        - { $ref: '#/components/parameters/PropertyId' }
+        - { $ref: '#/components/parameters/XSirenProperty' }
       responses:
         '200': { $ref: '#/components/responses/PaginatedList' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /payouts:
     get:
       tags: [Reconciliation]
@@ -2298,6 +2408,14 @@ paths:
       description: |
         A connected site must send `id`, `collaboratorId` or `fulfillmentId`,
         or Siren Cloud answers 403 `site_filter_required`.
+
+        An API key needs the `ledger:payouts:read` scope, and must be
+        organization-wide. Payouts are not kept by store, so a key bound to
+        one store is refused with 403 `store_key_not_allowed`.
+      security:
+        - apiKey: ['ledger:payouts:read']
+        - dashboardSession: []
+        - connectorToken: []
       parameters:
         - { $ref: '#/components/parameters/Number' }
         - { $ref: '#/components/parameters/Offset' }
@@ -2320,8 +2438,14 @@ components:
       scheme: bearer
       bearerFormat: sk_live_...
       description: |
-        An API key minted in the Siren dashboard or via createApiKey. It sends
-        events and is refused on every other route.
+        An API key minted in the Siren dashboard or via createApiKey. Event
+        scopes send events. The ledger scopes read conversions, transactions,
+        obligations and payouts, and the webhook scopes read and manage
+        webhook subscriptions. Each operation lists the scopes that open it,
+        and holding any one listed requirement is enough. Every other route
+        answers an API key with 401 `api_key_not_accepted`, the API key
+        routes included. A key's requests count against the organization's
+        API rate limit.
     dashboardSession:
       type: http
       scheme: bearer
@@ -2380,6 +2504,19 @@ components:
       name: id
       in: path
       required: true
+      schema: { type: integer, minimum: 1 }
+    PropertyId:
+      name: propertyId
+      in: query
+      description: |
+        Narrows an organization-wide read to one store (Property). A key
+        bound to one store reads only its own store's rows, whatever it
+        sends here.
+      schema: { type: integer, minimum: 1 }
+    XSirenProperty:
+      name: X-Siren-Property
+      in: header
+      description: The same one-store filter as `propertyId`, sent as a header.
       schema: { type: integer, minimum: 1 }
   schemas:
     Record:
@@ -2677,11 +2814,20 @@ components:
           type: array
           minItems: 1
           items: { type: string }
-          example: ['event:*']
+          example: ['event:*', 'ledger:conversions:read']
           description: |
             Event scopes: `event:*` for every event, or `event:{slug}` for one
             event type. `*` is also accepted and grants what `event:*` grants.
-            A record scope such as `programs:read` is refused with 400.
+
+            Ledger and webhook scopes: `ledger:conversions:read`,
+            `ledger:transactions:read`, `ledger:obligations:read`,
+            `ledger:payouts:read`, `webhook-subscriptions:read` and
+            `webhook-subscriptions:manage`. Each is granted only by its exact
+            name. `*`, `event:*` and wildcards such as `ledger:*` grant none
+            of them.
+
+            An older resource scope such as `programs:read` or
+            `conversions:read` is refused with 400.
         expiresAt:
           type: string
           format: date-time
@@ -2689,16 +2835,28 @@ components:
         propertyId:
           type: integer
           minimum: 1
-          description: Stamps the key's events with this Property of the organization.
+          description: |
+            Binds the key to this Property of the organization. Siren stamps
+            it on the key's events, the key reads only that store's
+            conversions, transactions and obligations, and it is refused on
+            payouts and webhook subscriptions with 403 `store_key_not_allowed`.
+    ApiKeyScopeEntry:
+      type: object
+      properties:
+        scope: { type: string, example: 'ledger:conversions:read' }
+        resource: { type: string, example: ledger }
+        action: { type: string, example: 'conversions:read' }
+        label: { type: string, example: Read conversions }
     Error:
       type: object
       description: |
         `error` is polymorphic. Some endpoints return a plain string message,
         and structured errors return an object with `message`, `code` and
         `data` or `context`. Clients must handle both. A connector's 401,
-        403 and 409, and every 403 of a signed-in caller, carry a stable
-        `code` (see `ErrorCode` in the SDK): `site_disconnected`,
-        `missing_scope`, `field_not_allowed`, `pending_status_required`,
+        403 and 409, an API key's refusal on the ledger and webhook routes,
+        and every 403 of a signed-in caller, carry a stable `code` (see
+        `ErrorCode` in the SDK): `site_disconnected`, `api_key_not_accepted`,
+        `missing_scope`, `store_key_not_allowed`, `field_not_allowed`, `pending_status_required`,
         `user_type_not_allowed`, `program_not_on_site`,
         `collaborator_not_on_site`, `site_filter_required`,
         `report_not_allowed`, `migration_closed`, `not_permitted`,
@@ -2758,7 +2916,10 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Unauthorized:
-      description: Missing, invalid, expired or revoked credential.
+      description: |
+        Missing, invalid, expired or revoked credential. A valid API key sent
+        to a route that takes a session gets `error.code`
+        `api_key_not_accepted`.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -2775,7 +2936,11 @@ components:
         when there is one. `plan_required` means the plan does not include the
         feature, `admin_required` that only an admin may do this, and
         `migration_closed` that an admin must approve the site's connection
-        again.
+        again. For an API key, `missing_scope` means the key holds none of the
+        route's scopes, `error.context.scope` names one and
+        `error.context.anyOf` lists every scope that opens the route.
+        `store_key_not_allowed` means a key bound to one store asked for
+        payouts or webhook subscriptions, which are not kept by store.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

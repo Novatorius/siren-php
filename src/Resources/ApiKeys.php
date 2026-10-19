@@ -9,9 +9,9 @@ use Siren\Sdk\HttpTransport;
 /**
  * API key management (`/api-keys`).
  *
- * These routes take a signed-in dashboard session's access token. An API
- * key cannot manage keys, because Siren Cloud accepts API keys on the event
- * routes only.
+ * These routes take a signed-in dashboard session's access token. No API
+ * key scope reaches them, so Siren answers an API key with a 401 that the
+ * SDK raises as {@see \Siren\Sdk\Exception\ApiKeyNotAcceptedException}.
  */
 final class ApiKeys
 {
@@ -23,12 +23,20 @@ final class ApiKeys
     /**
      * Creates a new API key.
      *
-     * Required: `scopes`, a non-empty list of event scopes such as
-     * `[ApiKeyScope::ALL_EVENTS]` (see {@see \Siren\Sdk\ApiKeyScope}). Siren
-     * refuses a record scope such as `programs:read`, because a key only
-     * sends events. Optional: `label`, `expiresAt` (an ISO 8601 date in the
-     * future), and `propertyId`, which stamps the key's events with one of
-     * the organization's Properties.
+     * Required: `scopes`, a non-empty list from {@see \Siren\Sdk\ApiKeyScope}.
+     * Event scopes such as `ApiKeyScope::ALL_EVENTS` let the key send events.
+     * The ledger scopes, such as `ApiKeyScope::LEDGER_CONVERSIONS_READ`, let
+     * it read conversions, transactions, obligations and payouts, and
+     * `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ` and
+     * `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE` let it read and manage
+     * webhook subscriptions. Siren refuses the older resource scopes, such
+     * as `programs:read` or `conversions:read`, with a 400.
+     *
+     * Optional: `label`, `expiresAt` (an ISO 8601 date in the future), and
+     * `propertyId`, which binds the key to one of the organization's
+     * Properties. Siren stamps that store on the key's events, the key reads
+     * only that store's conversions, transactions and obligations, and it is
+     * refused on payouts and webhook subscriptions.
      *
      * The returned array includes `rawKey` (`sk_live_...`) — it is returned
      * ONCE and cannot be retrieved later. This call is never auto-retried.
@@ -43,8 +51,8 @@ final class ApiKeys
 
         if (!is_array($scopes) || $scopes === []) {
             throw new \InvalidArgumentException(
-                'The "scopes" field is required for apiKeys->create(). Pass a list of event scopes, '
-                . 'such as [ApiKeyScope::ALL_EVENTS] for every event.',
+                'The "scopes" field is required for apiKeys->create(). Pass a list of scopes, '
+                . 'such as [ApiKeyScope::ALL_EVENTS] for every event or [ApiKeyScope::LEDGER_CONVERSIONS_READ].',
             );
         }
 
@@ -72,8 +80,9 @@ final class ApiKeys
 
     /**
      * The scopes a new key may be given, grouped by resource, from
-     * `GET /api-keys/scopes`. Siren offers the event scopes alone, as
-     * `{"events": [{scope, resource, action, label}, ...]}`.
+     * `GET /api-keys/scopes`, as
+     * `{"events": [...], "ledger": [...], "webhook-subscriptions": [...]}`.
+     * Each entry is `{scope, resource, action, label}`.
      *
      * @return array<string, mixed>
      */

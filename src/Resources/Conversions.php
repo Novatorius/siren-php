@@ -11,7 +11,9 @@ use Siren\Sdk\ListResult;
  * Conversions (`/conversions`): an engagement that turned into a reward.
  *
  * `$siren->conversions->list()` keeps working as the reconciliation reader
- * it was in 0.1.0.
+ * it was in 0.1.0. `list()` and `retrieve()` take an API key that holds
+ * {@see \Siren\Sdk\ApiKeyScope::LEDGER_CONVERSIONS_READ}, as well as a
+ * dashboard session or a connected site's token.
  */
 class Conversions extends ListResource
 {
@@ -33,6 +35,11 @@ class Conversions extends ListResource
      * Sort with `orderBy` (`id`, `engagementId`, `type`, `status`,
      * `dateCreated`) and `order`.
      *
+     * `propertyId` narrows the list to one store's conversions when the
+     * credential reads the whole organization, such as an
+     * organization-wide API key. A key bound to one store reads only its own
+     * store's conversions whatever it sends.
+     *
      * @param array<string, mixed> $params
      */
     public function list(array $params = []): ListResult
@@ -41,7 +48,11 @@ class Conversions extends ListResource
     }
 
     /**
-     * @param array<string, mixed> $params `fields` or `include`.
+     * Reads one conversion. A key bound to one store gets a
+     * {@see \Siren\Sdk\Exception\NotFoundException} for another store's
+     * conversion.
+     *
+     * @param array<string, mixed> $params `fields`, `include`, or `propertyId`.
      *
      * @return array<int|string, mixed>
      */

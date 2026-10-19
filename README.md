@@ -18,8 +18,8 @@ This SDK is the official PHP client for the Siren API. It lets you:
 
 - Record commerce and tracking events (`sale`, `refund`, `siteVisited`, and custom event types)
 - Verify signed webhooks in a single, constant-time call
-- Manage API keys and webhook subscriptions, with a signed-in dashboard session's token
-- Reconcile Siren's ledger (conversions, transactions, obligations, payouts) against your own, with a dashboard session's or a connected site's token
+- Manage webhook subscriptions, with an API key or a signed-in dashboard session's token, and API keys, with a session's token
+- Reconcile Siren's ledger (conversions, transactions, obligations, payouts) against your own, with an API key, a dashboard session's token or a connected site's token
 - Read and write the records a connector needs: collaborators and their tracking codes and program enrollments, mappings, programs, program groups, opportunities, transactions, conversions, engagements, distributors, custom currencies, store credit and its holds, shared settings, and collaborator groups
 - Run inside any host: bring your own HTTP client and your own OAuth access token
 
@@ -123,11 +123,11 @@ delivery whose body is the bare payload is refused without `$eventType`,
 because only the `X-Siren-Event` header names its event.
 
 Create a subscription (the `signingSecret` is returned **once** — store it).
-Subscriptions and API keys are managed with a signed-in dashboard session's
-access token. Siren Cloud accepts an API key on the event routes only:
+An API key that holds `webhook-subscriptions:manage` can do this, and so can
+a signed-in dashboard session's access token:
 
 ```php
-$siren = new Siren(['accessToken' => $dashboardAccessToken]);
+$siren = new Siren(['apiKey' => 'sk_live_...']); // a key with ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE
 
 $subscription = $siren->webhooks->subscriptions->create([
     'targetUrl' => 'https://example.com/webhooks/siren',
@@ -145,29 +145,64 @@ $siren->webhooks->subscriptions->events(); // the live catalog: [{event, categor
 | Calls | Credential |
 |-------|------------|
 | `events` | An API key holding the event's scope (`event:*`, or `event:{slug}`). A connected site's token sends only the events its integrations forward and `site-visited`. |
-| `apiKeys`, `webhooks->subscriptions` | A signed-in dashboard session's access token. |
-| Record resources, including `conversions`, `transactions`, `obligations` and `payouts` | A dashboard session's access token, or a connected site's token on the routes Siren Cloud opens to connectors. See [Connected sites](#connected-sites). |
+| `conversions`, `transactions`, `obligations` and `payouts`: `list()`, and `retrieve()` where the SDK has it | An API key holding the matching ledger scope, such as `ledger:conversions:read`. A dashboard session's access token, or a connected site's token, also works. |
+| `webhooks->subscriptions` | An API key holding `webhook-subscriptions:read` for `list()` and `events()`, or `webhook-subscriptions:manage` for every call. A dashboard session's access token also works. |
+| `apiKeys` | A signed-in dashboard session's access token. No API key scope reaches them. |
+| Other record resources, and the writes on `conversions` and `transactions` | A dashboard session's access token, or a connected site's token on the routes Siren Cloud opens to connectors. See [Connected sites](#connected-sites). |
 
-Siren Cloud refuses an API key on every route but event ingestion, so a key
-cannot read records or manage keys and subscriptions. A new key may hold
-event scopes only. `ApiKeyScope` names them:
+`ApiKeyScope` names every scope a new key may hold:
 
 ```php
 use Siren\Sdk\ApiKeyScope;
 
 $key = $siren->apiKeys->create([
-    'label'  => 'Production server',
-    'scopes' => [ApiKeyScope::ALL_EVENTS],
+    'label'  => 'Accounting export',
+    'scopes' => [
+        ApiKeyScope::ALL_EVENTS,
+        ApiKeyScope::LEDGER_CONVERSIONS_READ,
+        ApiKeyScope::LEDGER_PAYOUTS_READ,
+        ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE,
+    ],
 ]);
+```
+
+| Scope | What the key can do |
+|-------|---------------------|
+| `ApiKeyScope::ALL_EVENTS`, `ApiKeyScope::event($slug)` | Send events |
+| `ApiKeyScope::LEDGER_CONVERSIONS_READ` | `conversions->list()`, `conversions->retrieve()` |
+| `ApiKeyScope::LEDGER_TRANSACTIONS_READ` | `transactions->list()`, `transactions->retrieve()` |
+| `ApiKeyScope::LEDGER_OBLIGATIONS_READ` | `obligations->list()` |
+| `ApiKeyScope::LEDGER_PAYOUTS_READ` | `payouts->list()` |
+| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ` | `webhooks->subscriptions->list()`, `events()` |
+| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE` | Every `webhooks->subscriptions` call |
+
+Siren grants the ledger and webhook scopes only by their exact names. `*`,
+`event:*`, wildcards such as `ledger:*`, and older names such as
+`conversions:read` grant none of them, so a key made before these scopes
+existed reads nothing until you replace it with one that holds them. A key's
+requests count against the organization's API rate limit.
+
+A key created with a `propertyId` is bound to that store. It reads only its
+own store's conversions, transactions and obligations, and Siren refuses it on
+payouts and webhook subscriptions with `StoreKeyNotAllowedException`. An
+organization-wide key reads the whole organization, and narrows a ledger read
+to one store with the `propertyId` filter:
+
+```php
+use Siren\Sdk\ConversionStatus;
+
+$siren = new Siren(['apiKey' => 'sk_live_...']); // organization-wide, with ledger:conversions:read
+
+$page = $siren->conversions->list(['propertyId' => 5, 'status' => ConversionStatus::APPROVED]);
 ```
 
 ## Features
 
 - **Event ingestion** — `sale`, `refund`, `siteVisited`, and custom event types via `ingest`, with what Siren recorded (`EventStatus`) and whether it queued the event.
 - **Webhook verification** — one-call `constructEventFromHeaders` or `constructEvent`, plus a lower-level constant-time `verifySignature` boolean check.
-- **Subscription management** — create, list, and delete webhook subscriptions, and read the event catalog.
+- **Subscription management** — create, list, and delete webhook subscriptions, and read the event catalog, with an API key or a dashboard session.
 - **API key management** — create, list, and revoke keys, and read the scopes a key may hold.
-- **Reconciliation readers** — paginated iterators over conversions, transactions, obligations, and payouts.
+- **Reconciliation readers** — paginated iterators over conversions, transactions, obligations, and payouts, with an API key that holds the ledger scopes.
 - **Record resources**: collaborators (with tracking codes and program enrollments), mappings, settings, programs, program groups, opportunities, transactions and their details, conversions, engagements, distributors, custom currencies, store credit, and collaborator groups. See [Records](#records).
 - **Host-supplied HTTP and tokens**: plug in your platform's HTTP client and an OAuth access token that refreshes after a 401. See [Connecting a host](#connecting-a-host).
 - **Automatic retries** — network errors, 429s, and 5xx are retried with exponential backoff on idempotent operations; management writes are never auto-retried.
@@ -203,8 +238,8 @@ Every exception extends `Siren\Sdk\Exception\SirenException` and carries
 | Status          | Exception                                  |
 |-----------------|--------------------------------------------|
 | 400             | `BadRequestException`                      |
-| 401             | `AuthenticationException`, or `SiteDisconnectedException` when Siren says the site is no longer connected |
-| 403             | `PermissionException`, or its subclasses `MissingScopeException` (`getRequiredScope()`) and `PolicyException` (`getParam()`) |
+| 401             | `AuthenticationException`, or its subclasses `SiteDisconnectedException` when Siren says the site is no longer connected, and `ApiKeyNotAcceptedException` when the route takes a session and not an API key |
+| 403             | `PermissionException`, or its subclasses `MissingScopeException` (`getRequiredScope()`, `getAnyOf()`), `StoreKeyNotAllowedException` (`getPropertyId()`) and `PolicyException` (`getParam()`) |
 | 404             | `NotFoundException`                        |
 | 409             | `ConflictException`, or `CodeConflictException` and `HoldConflictException` (`getReason()`) from the calls that raise them |
 | 422             | `ValidationException`, `getFieldErrors()`  |
@@ -219,7 +254,9 @@ Webhook verification failures throw `SignatureVerificationException`.
 > **Credentials on record routes.** The record routes accept a signed-in
 > dashboard session, and a connected site's OAuth token reaches the routes
 > Siren Cloud opens to connectors once the site holds the record scopes. See
-> [Connected sites](#connected-sites).
+> [Connected sites](#connected-sites). An API key reads conversions,
+> transactions, obligations and payouts with a ledger scope. See
+> [Which credential does each call need?](#which-credential-does-each-call-need)
 
 Every record resource follows the same shape: `list()`, `retrieve()`,
 `create()`, `update()`, `delete()`, and `bulk()`, where Siren has the route.

@@ -9,9 +9,13 @@ use Siren\Sdk\HttpTransport;
 /**
  * Webhook subscription management (`/webhooks`).
  *
- * These routes take a signed-in dashboard session's access token. Siren
- * Cloud does not accept an organization API key here, because API keys only
- * send events.
+ * These routes take a signed-in dashboard session's access token, or an API
+ * key with a webhook scope. {@see \Siren\Sdk\ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ}
+ * opens `list()` and `events()`, and
+ * {@see \Siren\Sdk\ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE} opens every
+ * method here. The key must be organization-wide, because subscriptions are
+ * not kept by store. A key bound to one store gets a
+ * {@see \Siren\Sdk\Exception\StoreKeyNotAllowedException}.
  */
 final class WebhookSubscriptions
 {
