@@ -34,7 +34,11 @@ class Collaborators extends ListResource
      */
     public const BINDING_FIELDS = ['programs', 'distributors', 'groups'];
 
-    /** The only fields Siren Cloud lets a connected site send when it changes a collaborator. */
+    /**
+     * The only parameters Siren Cloud lets a connected site send when it
+     * changes a collaborator. `fields` is the list of fields to return, held
+     * to the ones a site may read.
+     */
     public const SITE_UPDATABLE_FIELDS = ['id', 'fullName', 'nickname', 'fields'];
 
     /** A collaborator's tracking codes. */
@@ -144,8 +148,9 @@ class Collaborators extends ListResource
     }
 
     /**
-     * Updates a collaborator the way a connected site must: only `fullName`,
-     * `nickname` and custom `fields`. Siren refuses a status or email change
+     * Updates a collaborator the way a connected site must: only `fullName`
+     * and `nickname`, plus `fields` to choose which readable fields come
+     * back. Siren refuses a status or email change
      * from a connected site, because Cloud claims accounts by email and
      * approval stays with the organization, and it refuses the binding lists
      * for the reason {@see createPending()} gives. It also refuses

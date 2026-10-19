@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The next release is 0.3.0, a minor bump, because the changes below break
+existing callers. Each one follows a rule Siren already enforces.
+
+### Breaking
+
+- `apiKeys->create()` throws `InvalidArgumentException` without a non-empty
+  `scopes` list. Siren answers 400 to a key without scopes.
+- `collaborators->updateDetails()` throws `InvalidArgumentException` for
+  `trackingId`, `referralCode` and every parameter other than `fullName`,
+  `nickname`, `fields` and `id`. Siren Cloud refuses them from a connected
+  site with a 403.
+- `webhooks->constructEvent()` on a bare payload returns the whole body as
+  `getData()`, and throws `SignatureVerificationException` when `$eventType`
+  is not passed. The three-argument call from 0.2.0 used to return an event
+  with an empty type for every bare payload, which no handler matched. Pass
+  the `X-Siren-Event` header, or call `constructEventFromHeaders()`. An
+  envelope is now known by its `version` field.
+
 ### Added
 
 - `EventResult` now carries what Siren reports about an ingested event:
@@ -48,8 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cloud accepts an API key on the event routes only. API keys and webhook
   subscriptions are managed with a signed-in dashboard session's token, and
   the record routes take that or a connected site's token.
-- `collaborators->updateDetails()` sends only `fullName`, `nickname` and
-  custom `fields`. Siren Cloud now refuses `trackingId` and every other
+- `collaborators->updateDetails()` sends only `fullName` and `nickname`,
+  plus `fields` to choose the returned fields. Siren Cloud now refuses `trackingId` and every other
   field from a connected site with a 403, so the SDK refuses them before
   sending. A site changes codes through `aliases->create()` and
   `aliases->free()`.
@@ -70,10 +88,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a subscription made with `subscriptions->create()` receives the flat event
   payload, with the type in `X-Siren-Event` and the delivery id in
   `X-Siren-Delivery`. Such events came back with an empty type and empty
-  data. `constructEvent()` now takes the two header values as optional
-  arguments and returns the payload as the data. An envelope with its own
-  `type` and `data`, as a connected site's subscription receives, is read
-  as before.
+  data. `constructEvent()` now takes the two header values as arguments,
+  returns the payload as the data, and refuses a payload that arrives
+  without the event type. The versioned envelope a connected site's
+  subscription receives is read from the body and needs no headers.
+- `BadRequestException::getFieldErrors()` is documented as the list Siren
+  sends, one `{field, message, type, context}` entry per broken rule. It
+  said the messages were keyed by field name.
 - The `sale()` docblock and `openapi.yaml` said a sale without `currency`
   defaults to USD. Siren records it in the organization's default currency.
 - `openapi.yaml` described event validation failures as 422. Siren answers

@@ -28,7 +28,7 @@ info:
     `connect:records:write` for writes. Those are explicit scopes, so
     `connect:*` does not grant them. A site writes only collaborators (as
     `pending`, without program, distributor or group lists, and on update
-    only `fullName`, `nickname` and custom `fields`), codes, enrollments,
+    only `fullName` and `nickname`, with `fields` to pick the returned fields), codes, enrollments,
     collaborator mappings and credit holds. A site reads only the fields its
     datastores need, may not send `include`, and must filter opportunities
     and payouts to one collaborator or record (`site_filter_required`). A

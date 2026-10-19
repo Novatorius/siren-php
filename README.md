@@ -118,8 +118,9 @@ match ($event->getType()) {
 ```
 
 `constructEvent($rawBody, $signature, $secret, $eventType, $deliveryId)`
-does the same with the three header values passed one by one. Leave out
-`$eventType` and a payload event's `getType()` is empty.
+does the same with the three header values passed one by one. A
+delivery whose body is the bare payload is refused without `$eventType`,
+because only the `X-Siren-Event` header names its event.
 
 Create a subscription (the `signingSecret` is returned **once** — store it).
 Subscriptions and API keys are managed with a signed-in dashboard session's
@@ -404,7 +405,7 @@ use Siren\Sdk\Resources\Mappings;
 
 // Collaborators are created pending, with no program, distributor or group lists.
 $ada = $siren->collaborators->createPending(['fullName' => 'Ada', 'nickname' => 'ada', 'email' => 'ada@example.com']);
-$siren->collaborators->updateDetails($ada['id'], ['nickname' => 'countess']);   // fullName, nickname and custom fields only
+$siren->collaborators->updateDetails($ada['id'], ['nickname' => 'countess']);   // fullName and nickname only
 $siren->collaborators->enrollments->add($ada['id'], 12);                        // programs that run on this site only
 
 // Codes and mappings, by plain type.
