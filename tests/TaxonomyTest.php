@@ -47,7 +47,9 @@ final class TaxonomyTest extends BaseTestCase
             '*',
             'allocation.completed',
             'collaborator.created',
+            'collaborator.deactivated',
             'collaborator.registered',
+            'collaborator.updated',
             'conversion.approved',
             'conversion.created',
             'conversion.rejected',
@@ -71,6 +73,7 @@ final class TaxonomyTest extends BaseTestCase
             'opportunity.invalidated',
             'payout.created',
             'payout.paid',
+            'program.created',
             'refund.created',
             'renewal.created',
             'sale.created',
@@ -113,7 +116,7 @@ final class TaxonomyTest extends BaseTestCase
     public function testObligationStatusMatchesCanonicalSet(): void
     {
         $this->assertSame(
-            ['cancelled', 'complete', 'fulfilled', 'pending'],
+            ['approved', 'cancelled', 'complete', 'deleted', 'draft', 'fulfilled', 'pending', 'rejected'],
             $this->constantValues(ObligationStatus::class)
         );
     }

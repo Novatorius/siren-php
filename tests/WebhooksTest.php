@@ -18,13 +18,14 @@ final class WebhooksTest extends TestCase
         return 'sha256=' . hash_hmac('sha256', $body, $secret);
     }
 
+    /**
+     * A delivery body as Siren's WebhookDeliveryService sends it to a
+     * subscription with no Property: the event payload alone. The type and
+     * delivery id travel in headers.
+     */
     private static function payload(): string
     {
-        return json_encode([
-            'type' => 'conversion.approved',
-            'data' => ['id' => 501, 'amount' => 12.5],
-            'deliveryId' => 'dlv_abc123',
-        ], JSON_THROW_ON_ERROR);
+        return json_encode(['conversionId' => 501, 'amount' => 12.5], JSON_THROW_ON_ERROR);
     }
 
     public function testConstructEventReturnsAVerifiedEvent(): void
@@ -32,12 +33,146 @@ final class WebhooksTest extends TestCase
         $siren = $this->mockSiren([]);
         $body = self::payload();
 
-        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET);
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'conversion.approved', 'evt_abc123');
 
         $this->assertInstanceOf(WebhookEvent::class, $event);
         $this->assertSame(WebhookEventType::CONVERSION_APPROVED, $event->getType());
-        $this->assertSame(['id' => 501, 'amount' => 12.5], $event->getData());
-        $this->assertSame('dlv_abc123', $event->getDeliveryId());
+        $this->assertSame(['conversionId' => 501, 'amount' => 12.5], $event->getData());
+        $this->assertSame('evt_abc123', $event->getDeliveryId());
+    }
+
+    /**
+     * Code written for 0.2.0 calls constructEvent() with three arguments. A
+     * flat body names no event, so the SDK refuses it instead of returning
+     * an event with an empty type that no handler matches.
+     */
+    public function testConstructEventRefusesAFlatBodyWithoutTheEventHeader(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = self::payload();
+
+        $this->expectException(SignatureVerificationException::class);
+        $this->expectExceptionMessage('X-Siren-Event');
+
+        $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET);
+    }
+
+    public function testConstructEventRefusesABlankEventHeader(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = self::payload();
+
+        $this->expectException(SignatureVerificationException::class);
+
+        $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, '  ', 'evt_1');
+    }
+
+    /**
+     * A flat payload with its own `type` and `data` keys is still the
+     * payload, and still needs the header.
+     */
+    public function testAFlatBodyWithTypeAndDataKeysIsNotAnEnvelope(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode(['type' => 'points', 'data' => ['note' => 'x']], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'currency.created', 'evt_9');
+
+        $this->assertSame(WebhookEventType::CURRENCY_CREATED, $event->getType());
+        $this->assertSame(['type' => 'points', 'data' => ['note' => 'x']], $event->getData());
+
+        $this->expectException(SignatureVerificationException::class);
+        $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET);
+    }
+
+    /** An envelope names its own type and id, so it needs no headers. */
+    public function testAnEnvelopeNeedsNoHeaders(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode([
+            'version' => 1,
+            'id' => 'evt_test',
+            'type' => 'webhook.test',
+            'kind' => 'test',
+            'data' => ['nonce' => 'abc'],
+            'records' => new \stdClass(),
+        ], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET);
+
+        $this->assertSame('webhook.test', $event->getType());
+        $this->assertSame(['nonce' => 'abc'], $event->getData());
+        $this->assertSame('evt_test', $event->getDeliveryId());
+    }
+
+    /**
+     * A custom event's payload is whatever the sender posted, so it can look
+     * like an envelope. Delivered to an ordinary subscription, its `id` is
+     * not the delivery id in X-Siren-Delivery, so the SDK keeps the whole
+     * body and the header's event type.
+     */
+    public function testACustomPayloadShapedLikeAnEnvelopeIsNotUnwrapped(): void
+    {
+        $siren = $this->mockSiren([]);
+        $payload = [
+            'version' => 2,
+            'id' => 'order-81',
+            'type' => 'subscription',
+            'data' => ['plan' => 'pro'],
+        ];
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEventFromHeaders($body, [
+            'X-Siren-Signature' => self::sign($body),
+            'X-Siren-Event' => 'plan.renewed',
+            'X-Siren-Delivery' => 'evt_0f3a',
+        ], self::SECRET);
+
+        $this->assertSame('plan.renewed', $event->getType());
+        $this->assertSame($payload, $event->getData());
+        $this->assertSame('evt_0f3a', $event->getDeliveryId());
+    }
+
+    /** The same holds for a payload of just `version`, `type` and `data`. */
+    public function testAVersionTypeDataPayloadIsNotUnwrapped(): void
+    {
+        $siren = $this->mockSiren([]);
+        $payload = ['version' => 1, 'type' => 'refund', 'data' => ['orderId' => 9]];
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'order.synced', 'evt_77');
+
+        $this->assertSame('order.synced', $event->getType());
+        $this->assertSame($payload, $event->getData());
+    }
+
+    /**
+     * With X-Siren-Event and no X-Siren-Delivery there is no delivery id to
+     * match, so even an envelope-shaped body stays whole.
+     */
+    public function testAnEnvelopeShapeWithoutTheDeliveryHeaderIsNotUnwrapped(): void
+    {
+        $siren = $this->mockSiren([]);
+        $payload = ['version' => 1, 'id' => 'evt_1', 'type' => 'sale.created', 'data' => ['transactionId' => 1]];
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'sale.created');
+
+        $this->assertSame($payload, $event->getData());
+        $this->assertNull($event->getDeliveryId());
+    }
+
+    /** An envelope whose type differs from X-Siren-Event is not Siren's envelope. */
+    public function testAnEnvelopeWhoseTypeDiffersFromTheHeaderIsNotUnwrapped(): void
+    {
+        $siren = $this->mockSiren([]);
+        $payload = ['version' => 1, 'id' => 'evt_5', 'type' => 'refund', 'data' => ['orderId' => 9]];
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'order.synced', 'evt_5');
+
+        $this->assertSame('order.synced', $event->getType());
+        $this->assertSame($payload, $event->getData());
     }
 
     public function testConstructEventRejectsATamperedBody(): void
@@ -215,7 +350,7 @@ final class WebhooksTest extends TestCase
 
         $this->assertSame('*', $constants['ALL']);
         // The full canonical set is pinned in TaxonomyTest.
-        $this->assertCount(32, $constants, 'Expected 31 event types plus ALL.');
+        $this->assertCount(35, $constants, 'Expected 34 event types plus ALL.');
 
         foreach ($constants as $name => $value) {
             if ($name === 'ALL') {
@@ -224,5 +359,103 @@ final class WebhooksTest extends TestCase
 
             $this->assertMatchesRegularExpression('/^[a-z]+\.[a-z]+$/', $value);
         }
+    }
+
+    /**
+     * A subscription made through POST /webhooks receives the event payload
+     * as the body, with the type in X-Siren-Event and the delivery id in
+     * X-Siren-Delivery (Siren's WebhookDeliveryService).
+     */
+    public function testConstructEventReadsAFlatPayloadWithItsHeaders(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode(['conversionId' => 501, 'collaboratorId' => 42, 'status' => 'approved'], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'conversion.approved', 'evt_8a3f1b2c');
+
+        $this->assertSame(WebhookEventType::CONVERSION_APPROVED, $event->getType());
+        $this->assertSame(['conversionId' => 501, 'collaboratorId' => 42, 'status' => 'approved'], $event->getData());
+        $this->assertSame('evt_8a3f1b2c', $event->getDeliveryId());
+    }
+
+    /** A flat payload may hold its own `type` field, such as currency.created. */
+    public function testAFlatPayloadWithATypeFieldKeepsTheHeaderType(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode(['code' => 'PTS', 'type' => 'points'], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'currency.created', 'evt_1');
+
+        $this->assertSame(WebhookEventType::CURRENCY_CREATED, $event->getType());
+        $this->assertSame(['code' => 'PTS', 'type' => 'points'], $event->getData());
+    }
+
+    public function testConstructEventFromHeadersReadsAllThreeHeaders(): void
+    {
+        $siren = $this->mockSiren([]);
+        $body = json_encode(['payoutId' => 9], JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEventFromHeaders($body, [
+            'content-type' => 'application/json',
+            'x-siren-signature' => self::sign($body),
+            'X-Siren-Event' => ['payout.paid'],
+            'X-SIREN-DELIVERY' => 'evt_42',
+        ], self::SECRET);
+
+        $this->assertSame(WebhookEventType::PAYOUT_PAID, $event->getType());
+        $this->assertSame(['payoutId' => 9], $event->getData());
+        $this->assertSame('evt_42', $event->getDeliveryId());
+        $this->assertSame(['payoutId' => 9], $event->getBody());
+    }
+
+    public function testConstructEventFromHeadersRejectsAMissingSignature(): void
+    {
+        $siren = $this->mockSiren([]);
+
+        $this->expectException(SignatureVerificationException::class);
+
+        $siren->webhooks->constructEventFromHeaders('{}', ['X-Siren-Event' => 'sale.created'], self::SECRET);
+    }
+
+    /** A connected site's Property-bound subscription receives an envelope. */
+    public function testConstructEventReadsAPropertyEnvelope(): void
+    {
+        $siren = $this->mockSiren([]);
+        $envelope = [
+            'version' => 1,
+            'id' => 'evt_envelope',
+            'type' => 'sale.created',
+            'kind' => 'store',
+            'occurredAt' => '2026-10-18T12:00:00+00:00',
+            'propertyId' => 5,
+            'match' => 'origin',
+            'originPropertyId' => 5,
+            'data' => ['transactionId' => 77],
+            'records' => ['transaction' => ['id' => 77]],
+            'recordDetail' => 'full',
+            'omittedRecords' => [],
+            'recordsTruncated' => false,
+        ];
+        $body = json_encode($envelope, JSON_THROW_ON_ERROR);
+
+        $event = $siren->webhooks->constructEvent($body, self::sign($body), self::SECRET, 'sale.created', 'evt_envelope');
+
+        $this->assertSame(WebhookEventType::SALE_CREATED, $event->getType());
+        $this->assertSame(['transactionId' => 77], $event->getData());
+        $this->assertSame('evt_envelope', $event->getDeliveryId());
+        $this->assertSame(5, $event->getBody()['propertyId']);
+    }
+
+    public function testSubscriptionEventsReadsTheCatalog(): void
+    {
+        $catalog = [
+            ['event' => 'sale.created', 'category' => 'Sales', 'label' => 'A sale was recorded'],
+            ['event' => 'program.created', 'category' => 'Programs', 'label' => 'A program was created'],
+        ];
+        $siren = $this->mockSiren([self::jsonResponse(200, $catalog)]);
+
+        $this->assertSame($catalog, $siren->webhooks->subscriptions->events());
+        $this->assertSame('GET', $this->lastRequest()->getMethod());
+        $this->assertSame('https://api.sirenaffiliates.com/siren/v1/webhooks/events', (string) $this->lastRequest()->getUri());
     }
 }

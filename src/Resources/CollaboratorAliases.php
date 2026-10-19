@@ -44,6 +44,9 @@ final class CollaboratorAliases
     /**
      * Lists a collaborator's aliases, each `{code, type, issuedDate}`.
      *
+     * A connected site's token cannot use this: Siren Cloud refuses the
+     * computed field it reads with a 403. A site uses {@see query()}.
+     *
      * @return list<array<string, mixed>>
      */
     public function list(int $collaboratorId): array
@@ -88,6 +91,9 @@ final class CollaboratorAliases
      * Gives the collaborator a new tracking code. Siren refuses a code that
      * another collaborator holds with a 400, raised as
      * {@see \Siren\Sdk\Exception\BadRequestException} with field errors.
+     *
+     * Siren Cloud refuses `trackingId` from a connected site with a 403. A
+     * site uses {@see create()} and {@see free()} instead.
      *
      * @return array<int|string, mixed> The updated collaborator.
      */

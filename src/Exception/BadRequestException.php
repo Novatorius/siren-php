@@ -9,17 +9,19 @@ namespace Siren\Sdk\Exception;
  *
  * Siren also answers 400 when a field fails validation. Then
  * {@see getErrorCode()} is `VALIDATION_FAILED` and {@see getFieldErrors()}
- * holds the messages for each field.
+ * lists each broken rule.
  */
 class BadRequestException extends SirenException
 {
     public const VALIDATION_FAILED = 'VALIDATION_FAILED';
 
     /**
-     * Per-field validation messages from `error.context.failedValidations`,
-     * keyed by field name. Empty when the 400 was not a validation failure.
+     * The broken rules from `error.context.failedValidations`, one entry per
+     * rule in Siren's order, each `{field, message, type, context}`, such as
+     * `{"field": "total", "message": "total is required.", "type": "REQUIRED"}`.
+     * Empty when the 400 was not a validation failure.
      *
-     * @return array<string, mixed>
+     * @return array<int|string, mixed>
      */
     public function getFieldErrors(): array
     {

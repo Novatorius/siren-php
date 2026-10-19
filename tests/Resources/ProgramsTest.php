@@ -73,4 +73,28 @@ final class ProgramsTest extends TestCase
         $siren->programs->currencyTypes();
         $this->assertSame('/siren/v1/programs/currency-types', $this->sentPath());
     }
+
+    /** Siren's BulkIdsMiddleware::MAX_IDS refuses more than 500 ids with a 400. */
+    public function testBulkRefusesMoreThanFiveHundredIds(): void
+    {
+        $siren = $this->hostSiren([]);
+
+        try {
+            $siren->programs->bulk(Programs::BULK_DEACTIVATE, range(1, 501));
+            $this->fail('Expected an InvalidArgumentException.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('500', $e->getMessage());
+        }
+
+        $this->assertSame([], $this->http->requests);
+    }
+
+    public function testBulkSendsFiveHundredIds(): void
+    {
+        $siren = $this->hostSiren([self::hostJson(200, ['updated' => 500])]);
+
+        $siren->programs->bulk(Programs::BULK_DEACTIVATE, range(1, 500));
+
+        $this->assertCount(500, $this->sentJson()['ids']);
+    }
 }

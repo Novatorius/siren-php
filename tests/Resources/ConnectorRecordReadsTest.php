@@ -63,10 +63,10 @@ final class ConnectorRecordReadsTest extends TestCase
     {
         $siren = $this->hostSiren([self::hostJson(200, ['id' => 9])]);
 
-        $siren->collaborators->updateDetails(9, ['nickname' => 'countess', 'trackingId' => 'ADA2']);
+        $siren->collaborators->updateDetails(9, ['nickname' => 'countess', 'fullName' => 'Ada King']);
 
         $this->assertSame(['PUT', '/siren/v1/collaborators/9'], [$this->sent()->getMethod(), $this->sentPath()]);
-        $this->assertSame(['nickname' => 'countess', 'trackingId' => 'ADA2'], $this->sentJson());
+        $this->assertSame(['nickname' => 'countess', 'fullName' => 'Ada King'], $this->sentJson());
     }
 
     /**
@@ -74,7 +74,9 @@ final class ConnectorRecordReadsTest extends TestCase
      */
     public static function refusedOnUpdate(): array
     {
-        $fields = [...Collaborators::BINDING_FIELDS, 'status', 'email'];
+        // Siren's ConnectorRequestRules::COLLABORATOR_UPDATABLE allows only
+        // id, fullName, nickname and fields, so trackingId is refused too.
+        $fields = [...Collaborators::BINDING_FIELDS, 'status', 'email', 'trackingId', 'referralCode'];
 
         return array_combine($fields, array_map(static fn (string $field): array => [$field], $fields));
     }

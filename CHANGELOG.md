@@ -7,6 +7,142 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-19
+
+This is a minor bump, because the changes below break existing callers. Each
+one follows a rule Siren already enforces.
+
+### Breaking
+
+- `apiKeys->create()` throws `InvalidArgumentException` without a non-empty
+  `scopes` list. Siren answers 400 to a key without scopes.
+- `collaborators->updateDetails()` throws `InvalidArgumentException` for
+  `trackingId`, `referralCode` and every parameter other than `fullName`,
+  `nickname`, `fields` and `id`. Siren Cloud refuses them from a connected
+  site with a 403.
+- `webhooks->constructEvent()` on a bare payload returns the whole body as
+  `getData()`, and throws `SignatureVerificationException` when `$eventType`
+  is not passed. The three-argument call from 0.2.0 used to return an event
+  with an empty type for every bare payload, which no handler matched. Pass
+  the `X-Siren-Event` header, or call `constructEventFromHeaders()`. A body
+  is read as a connected site's envelope only when its `id` and `type`
+  match the `X-Siren-Delivery` and `X-Siren-Event` values, or when neither
+  header is passed, so a custom event's payload that holds `version`,
+  `type` and `data` keys stays whole.
+
+### Added
+
+- An API key reads Siren's ledger and manages webhook subscriptions, as Siren
+  Cloud 3.6.259 allows. `conversions` and `transactions` (`list()` and
+  `retrieve()`), `obligations->list()` and `payouts->list()` take a key that
+  holds the matching ledger scope. `webhooks->subscriptions->list()` and
+  `events()` take a key with `webhook-subscriptions:read` or
+  `webhook-subscriptions:manage`, and `create()` and `delete()` take one with
+  `webhook-subscriptions:manage`. A dashboard session's token still works on
+  all of them. Since Siren Cloud 3.6.260, `webhook-subscriptions:manage` also
+  sends a test delivery, and `openapi.yaml` lists that route,
+  `POST /webhooks/{id}/test`.
+- `ApiKeyScope::LEDGER_CONVERSIONS_READ`, `LEDGER_TRANSACTIONS_READ`,
+  `LEDGER_OBLIGATIONS_READ`, `LEDGER_PAYOUTS_READ`,
+  `WEBHOOK_SUBSCRIPTIONS_READ` and `WEBHOOK_SUBSCRIPTIONS_MANAGE`, and
+  `ApiKeyScope::LEDGER_READ`, the four ledger scopes together.
+  `apiKeys->create()` sends them as given. Siren grants each only by its
+  exact name, so `*`, `event:*` and older names such as `conversions:read`
+  grant none of them.
+- `ApiKeyNotAcceptedException`, a 401 `AuthenticationException` for
+  `api_key_not_accepted`, which Siren sends when a route takes a session and
+  not an API key, as every `apiKeys` route does.
+- `StoreKeyNotAllowedException`, a 403 `PermissionException` for
+  `store_key_not_allowed`, which Siren sends when a key bound to one store
+  asks for payouts or webhook subscriptions. `getPropertyId()` names the
+  key's store.
+- `MissingScopeException::getAnyOf()` lists every scope that opens the route,
+  from `error.context.anyOf`.
+- `ErrorCode::API_KEY_NOT_ACCEPTED` and `ErrorCode::STORE_KEY_NOT_ALLOWED`.
+- The ledger readers document the `propertyId` filter, which narrows an
+  organization-wide read to one store. A key bound to one store reads only
+  its own store's rows. `openapi.yaml` lists it, and the `X-Siren-Property`
+  header, on each ledger read.
+- `EventResult` now carries what Siren reports about an ingested event:
+  `getHttpStatus()`, `getStatus()`, `isQueued()`, `isAttributed()`,
+  `getReason()`, `getMessage()`, `getTransactionId()`, `getConversions()`
+  and `toArray()`. `EventStatus` names the statuses and reasons. A sale
+  answers `created`, `recorded`, `duplicate`, `unattributed` or `ignored`,
+  and a site visit answers `attributed`, `recorded` or `not_attributed`.
+- `EventResult::isQueued()` reports the 202 Siren sends when the
+  organization's engine is paused and it queues the event instead of
+  refusing it. A queued visit's opportunity id is read from the body when
+  the `X-Siren-OID` header is absent.
+- `Webhooks::constructEventFromHeaders()`, which reads `X-Siren-Signature`,
+  `X-Siren-Event` and `X-Siren-Delivery` from the request headers, and
+  `WebhookEvent::getBody()`.
+- `webhooks->subscriptions->events()` reads the live catalog from
+  `GET /webhooks/events`.
+- `WebhookEventType::COLLABORATOR_UPDATED`, `COLLABORATOR_DEACTIVATED` and
+  `PROGRAM_CREATED`, which Siren now delivers.
+- `ApiKeyScope`, the scopes an API key may hold, and `apiKeys->scopes()`
+  for `GET /api-keys/scopes`. `apiKeys->list()` takes `number` and `offset`.
+- `ObligationStatus::DRAFT`, `APPROVED`, `REJECTED` and `DELETED`, which
+  Siren uses. `FULFILLED` stays for compatibility and is documented as
+  retired, because Siren no longer accepts it.
+- `ListResource::MAX_BULK_IDS`. A bulk action with more than 500 ids is
+  refused before it is sent, as Siren refuses it with a 400.
+- `ErrorCode` knows the codes Siren Cloud added: `collaborator_not_on_site`,
+  `site_filter_required` and `report_not_allowed`, which raise a
+  `PolicyException`, `migration_closed`, which stays a plain
+  `PermissionException`, `reserved_address` (422) and `plan_unavailable`
+  (503).
+
+### Changed
+
+- `apiKeys->create()` requires `scopes` and no longer requires `label`,
+  as Siren does. Siren answers 400 to a key without scopes and to an older
+  resource scope such as `programs:read`.
+- The README and `openapi.yaml` say which credential each call takes. An API
+  key sends events, reads the ledger with a ledger scope, and manages webhook
+  subscriptions with a webhook scope. API keys are managed with a signed-in
+  dashboard session's token. The other record routes take that or a
+  connected site's token. `openapi.yaml` puts the ledger and webhook
+  operations on the `apiKey` scheme with the scopes each one needs, and
+  lists the new error codes.
+- `collaborators->updateDetails()` sends only `fullName` and `nickname`,
+  plus `fields` to choose the returned fields. Siren Cloud now refuses `trackingId` and every other
+  field from a connected site with a 403, so the SDK refuses them before
+  sending. A site changes codes through `aliases->create()` and
+  `aliases->free()`.
+- Docblocks, the README and `openapi.yaml` describe what Siren Cloud now
+  holds a connected site to: the fields it may read, the filters
+  opportunity and payout lists need, the held record a create returns for
+  someone the organization already has, the `held` amount on credit
+  balances, the `platformId` length after Cloud adds the Property, and the
+  empty body `conversions->update()` returns.
+- `openapi.yaml` lists the obligation and payout filters, answers 204 for
+  group deletes, and says a page size above 200 is lowered to 200. The page
+  size schema no longer sets a maximum, `externalId` on a sale, a refund
+  and a line item takes a string or a number, and `GET /ping` is listed
+  with the credentials it takes.
+- `HoldLimitException` and `ErrorCode::HOLD_LIMIT` are documented as
+  retired. Siren no longer caps credit holds, so it never sends `hold_limit`.
+
+### Fixed
+
+- `constructEvent()` read the event type and delivery id from the body, but
+  a subscription made with `subscriptions->create()` receives the flat event
+  payload, with the type in `X-Siren-Event` and the delivery id in
+  `X-Siren-Delivery`. Such events came back with an empty type and empty
+  data. `constructEvent()` now takes the two header values as arguments,
+  returns the payload as the data, and refuses a payload that arrives
+  without the event type. The versioned envelope a connected site's
+  subscription receives is read from the body and needs no headers.
+- `BadRequestException::getFieldErrors()` is documented as the list Siren
+  sends, one `{field, message, type, context}` entry per broken rule. It
+  said the messages were keyed by field name.
+- The `sale()` docblock and `openapi.yaml` said a sale without `currency`
+  defaults to USD. Siren records it in the organization's default currency.
+- `openapi.yaml` described event validation failures as 422. Siren answers
+  400 with `error.context.failedValidations`, which `BadRequestException`
+  reads.
+
 ## [0.2.0] - 2026-10-17
 
 ### Added
@@ -125,6 +261,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic retries with exponential backoff on idempotent operations.
 - Typed exception hierarchy under `Siren\Sdk\Exception`.
 
-[Unreleased]: https://github.com/Novatorius/siren-php/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/Novatorius/siren-php/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/Novatorius/siren-php/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/Novatorius/siren-php/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Novatorius/siren-php/releases/tag/0.1.0

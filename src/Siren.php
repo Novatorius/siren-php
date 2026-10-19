@@ -69,7 +69,7 @@ class Siren
     /** Verify inbound webhook signatures and manage subscriptions. */
     public readonly Webhooks $webhooks;
 
-    /** Manage API keys: `create`, `list`, `revoke`. */
+    /** Manage API keys: `create`, `list`, `revoke`. Takes a signed-in dashboard session. */
     public readonly ApiKeys $apiKeys;
 
     /** Conversions: list, read, create, update, delete, and bulk actions. */
@@ -78,10 +78,22 @@ class Siren
     /** Transactions and their details: list, read, create, and bulk actions. */
     public readonly Transactions $transactions;
 
-    /** Reconciliation reader for `GET /obligations`. */
+    /**
+     * Reconciliation reader for `GET /obligations`. Filters: `id`,
+     * `collaboratorId`, `status`, `awardType`, `payoutId`, `opportunityId`,
+     * and `propertyId` to narrow an organization-wide read to one store. An
+     * API key needs {@see ApiKeyScope::LEDGER_OBLIGATIONS_READ}.
+     */
     public readonly ListResource $obligations;
 
-    /** Reconciliation reader for `GET /payouts`. */
+    /**
+     * Reconciliation reader for `GET /payouts`. Filters: `id`,
+     * `fulfillmentId`, `collaboratorId`, `status`, `currency`. A connected
+     * site must send `id`, `collaboratorId` or `fulfillmentId`, or Siren
+     * Cloud answers 403 with `site_filter_required`. An API key needs
+     * {@see ApiKeyScope::LEDGER_PAYOUTS_READ}, and must be
+     * organization-wide, because payouts are not kept by store.
+     */
     public readonly ListResource $payouts;
 
     /** Collaborators, with their tracking codes (`->aliases`) and program enrollments (`->enrollments`). */

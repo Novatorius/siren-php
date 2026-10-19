@@ -6,6 +6,7 @@ namespace Siren\Sdk\Tests;
 
 use PHPUnit\Framework\Attributes\DataProvider;
 use Siren\Sdk\EventResult;
+use Siren\Sdk\EventStatus;
 
 final class EventsTest extends TestCase
 {
@@ -191,6 +192,134 @@ final class EventsTest extends TestCase
             'total' => 9.99,
             'trackingId' => 42,
         ]);
+
+        $this->assertNull($result->getOpportunityId());
+    }
+
+    /** A sale answers `{status, created, transactionId, conversions, message}` (Siren's SaleIngestion). */
+    public function testSaleReadsTheOutcomeSirenReports(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(200, [
+            'status' => 'created',
+            'created' => true,
+            'transactionId' => 77,
+            'conversions' => [['id' => 501, 'status' => 'pending']],
+            'message' => 'The sale was recorded.',
+        ], ['X-Siren-OID' => '4021'])]);
+
+        $result = $siren->events->sale(['source' => 'stripe', 'externalId' => 'o-1', 'total' => 10, 'trackingId' => 4021]);
+
+        $this->assertSame(200, $result->getHttpStatus());
+        $this->assertSame(EventStatus::CREATED, $result->getStatus());
+        $this->assertFalse($result->isQueued());
+        $this->assertSame(77, $result->getTransactionId());
+        $this->assertSame([['id' => 501, 'status' => 'pending']], $result->getConversions());
+        $this->assertSame('The sale was recorded.', $result->getMessage());
+        $this->assertNull($result->getReason());
+    }
+
+    public function testSaleThatEarnedNothingCarriesItsReason(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(200, [
+            'status' => 'recorded',
+            'created' => true,
+            'transactionId' => 78,
+            'conversions' => [],
+            'reason' => 'engagement_ended',
+            'message' => 'The sale was recorded and earned nothing.',
+        ])]);
+
+        $result = $siren->events->sale(['source' => 'stripe', 'externalId' => 'o-2', 'total' => 10, 'trackingId' => 9]);
+
+        $this->assertSame(EventStatus::RECORDED, $result->getStatus());
+        $this->assertSame(EventStatus::REASON_ENGAGEMENT_ENDED, $result->getReason());
+        $this->assertSame([], $result->getConversions());
+    }
+
+    /** While the org's engine is paused, Siren queues the event and answers 202. */
+    public function testAQueuedEventIsReportedAsQueued(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(202, [
+            'status' => 'queued',
+            'queued' => true,
+            'message' => 'Engine activity is paused for this organization.',
+        ])]);
+
+        $result = $siren->events->sale(['source' => 'stripe', 'externalId' => 'o-3', 'total' => 10, 'trackingId' => 9]);
+
+        $this->assertSame(202, $result->getHttpStatus());
+        $this->assertTrue($result->isQueued());
+        $this->assertSame(EventStatus::QUEUED, $result->getStatus());
+        $this->assertNull($result->getTransactionId());
+        $this->assertCount(1, $this->history, 'A queued event is a success and is never retried.');
+    }
+
+    /** A queued visit names the opportunity it will be recorded on in its body. */
+    public function testAQueuedVisitReturnsItsOpportunityFromTheBody(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(202, [
+            'status' => 'queued',
+            'queued' => true,
+            'attributed' => false,
+            'opportunityId' => 318,
+            'message' => 'Engine activity is paused for this organization.',
+        ])]);
+
+        $result = $siren->events->siteVisited(['collaboratorId' => 42]);
+
+        $this->assertTrue($result->isQueued());
+        $this->assertSame(318, $result->getOpportunityId());
+        $this->assertFalse($result->isAttributed());
+    }
+
+    public function testAVisitThatWasNotAttributedSaysWhy(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(200, [
+            'status' => 'not_attributed',
+            'attributed' => false,
+            'opportunityId' => null,
+            'reason' => 'collaborator_not_active',
+            'message' => 'The visit was not attributed. The collaborator is not active.',
+        ])]);
+
+        $result = $siren->events->siteVisited(['collaboratorId' => 42]);
+
+        $this->assertSame(EventStatus::NOT_ATTRIBUTED, $result->getStatus());
+        $this->assertSame(EventStatus::REASON_COLLABORATOR_NOT_ACTIVE, $result->getReason());
+        $this->assertFalse($result->isAttributed());
+        $this->assertNull($result->getOpportunityId());
+    }
+
+    public function testTheHeaderOpportunityWinsOverTheBody(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(200, [
+            'status' => 'attributed',
+            'attributed' => true,
+            'opportunityId' => 318,
+        ], ['X-Siren-OID' => '318'])]);
+
+        $result = $siren->events->siteVisited(['collaboratorId' => 42]);
+
+        $this->assertTrue($result->isAttributed());
+        $this->assertSame(318, $result->getOpportunityId());
+    }
+
+    public function testARefundWithNoBodyHasNoStatus(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(200)]);
+
+        $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1']);
+
+        $this->assertNull($result->getStatus());
+        $this->assertSame([], $result->toArray());
+        $this->assertFalse($result->isQueued());
+    }
+
+    public function testANonNumericOpportunityHeaderIsIgnored(): void
+    {
+        $siren = $this->mockSiren([self::jsonResponse(200, [], ['X-Siren-OID' => '1e3'])]);
+
+        $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1']);
 
         $this->assertNull($result->getOpportunityId());
     }

@@ -330,7 +330,14 @@ final class ErrorHandlingTest extends TestCase
     {
         // Siren's REST layer answers a failed validation with 400 and
         // {"error": {"message", "context": {"type", "failedValidations"}}}.
-        $failures = ['trackingId' => ['That tracking code is taken.']];
+        // failedValidations is a list, one {field, message, type, context}
+        // per broken rule, as Siren's SaveCollaboratorTrackingAlias builds it.
+        $failures = [[
+            'field' => 'trackingId',
+            'message' => 'trackingId is already in use by another collaborator. Tracking codes ignore upper and lower case.',
+            'type' => 'DUPLICATE_ENTRY',
+            'context' => [],
+        ]];
         $siren = $this->mockSiren(
             [self::jsonResponse(400, ['error' => [
                 'message' => 'Validations failed.',
@@ -346,6 +353,7 @@ final class ErrorHandlingTest extends TestCase
             $this->assertSame('Validations failed.', $e->getMessage());
             $this->assertSame(BadRequestException::VALIDATION_FAILED, $e->getErrorCode());
             $this->assertSame($failures, $e->getFieldErrors());
+            $this->assertSame('trackingId', $e->getFieldErrors()[0]['field']);
         }
     }
 

@@ -34,6 +34,13 @@ class Collaborators extends ListResource
      */
     public const BINDING_FIELDS = ['programs', 'distributors', 'groups'];
 
+    /**
+     * The only parameters Siren Cloud lets a connected site send when it
+     * changes a collaborator. `fields` is the list of fields to return, held
+     * to the ones a site may read.
+     */
+    public const SITE_UPDATABLE_FIELDS = ['id', 'fullName', 'nickname', 'fields'];
+
     /** A collaborator's tracking codes. */
     public readonly CollaboratorAliases $aliases;
 
@@ -71,6 +78,12 @@ class Collaborators extends ListResource
      * such as `aliases`, `referralCode`, `programs`, `distributors`,
      * `creditBalances`, or `groups`.
      *
+     * A connected site may ask only for `id`, `status`, `fullName`,
+     * `nickname`, `email` and the dates. Siren refuses a computed field such
+     * as `aliases` or `programs` from a site with a 403, so a site reads
+     * codes through `aliases->query()` and enrollments through
+     * `enrollments->list()`.
+     *
      * @param array<string, mixed> $params
      *
      * @return array<int|string, mixed>
@@ -88,6 +101,10 @@ class Collaborators extends ListResource
      * `pending` on create). Optional: `trackingId` (the tracking code, one
      * is generated when empty), `programs`, `distributors`, and `groups`
      * (lists of ids).
+     *
+     * Siren answers 422 with {@see \Siren\Sdk\Exception\ErrorCode::RESERVED_ADDRESS}
+     * when the email belongs to a held record that waits for its person to
+     * confirm.
      *
      * @param array<string, mixed> $params
      *
@@ -109,6 +126,15 @@ class Collaborators extends ListResource
      *
      * Required: `fullName`, `nickname` and `email`. Optional: `trackingId`.
      *
+     * When the organization already has a collaborator with that email and
+     * this site does not, Siren Cloud answers 201 with a held record for this
+     * site, not with the existing collaborator. Its `id` is the held
+     * record's own, its status is `pending`, it gets no tracking code (a
+     * `trackingId` sent is dropped), and Siren emails the person to confirm.
+     * Once they confirm, Siren merges the held record into their existing
+     * collaborator and deletes it, so the held id stops resolving. Look the
+     * collaborator up again by email after that.
+     *
      * @param array<string, mixed> $params
      *
      * @return array<int|string, mixed> The created collaborator.
@@ -122,13 +148,14 @@ class Collaborators extends ListResource
     }
 
     /**
-     * Updates a collaborator the way a connected site must: without
-     * `status`, `email`, `programs`, `distributors` or `groups`. Siren refuses
-     * a status or email change from a connected site, because Cloud claims
-     * accounts by email and approval stays with the organization, and it
-     * refuses the binding lists for the reason {@see createPending()} gives.
-     *
-     * Accepts `fullName`, `nickname` and `trackingId`.
+     * Updates a collaborator the way a connected site must: only `fullName`
+     * and `nickname`, plus `fields` to choose which readable fields come
+     * back. Siren refuses a status or email change
+     * from a connected site, because Cloud claims accounts by email and
+     * approval stays with the organization, and it refuses the binding lists
+     * for the reason {@see createPending()} gives. It also refuses
+     * `trackingId`, so a site changes codes with `aliases->create()` and
+     * `aliases->free()`. The SDK refuses every other field before sending.
      *
      * @param array<string, mixed> $params
      *
@@ -138,6 +165,12 @@ class Collaborators extends ListResource
     {
         self::refuse($params, self::BINDING_FIELDS, 'a connected site may not send it, so enroll through $siren->collaborators->enrollments->add()');
         self::refuse($params, ['status', 'email'], 'a connected site may not change it');
+        self::refuse($params, ['trackingId'], 'a connected site may not change it, so change codes through $siren->collaborators->aliases');
+        self::refuse(
+            $params,
+            array_values(array_diff(array_map('strval', array_keys($params)), self::SITE_UPDATABLE_FIELDS)),
+            'a connected site may send only ' . implode(', ', self::SITE_UPDATABLE_FIELDS),
+        );
 
         return $this->update($id, $params);
     }

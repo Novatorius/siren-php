@@ -35,7 +35,12 @@ final class Credits
     public const HOLD_MAX_TTL = 3600;
     public const HOLD_DEFAULT_TTL = 1800;
 
-    /** The longest platform id Siren accepts on a hold. */
+    /**
+     * The longest platform id Siren accepts on a hold. Siren Cloud adds the
+     * site's Property (`@property:5`) to a connected site's platform id
+     * before it checks the length, so a site's own limit is this less the
+     * length of that suffix.
+     */
     public const HOLD_PLATFORM_MAX_LENGTH = 60;
 
     /** The longest checkout token Siren accepts on a hold. */
@@ -84,6 +89,9 @@ final class Credits
      * `symbol`, `symbolPosition`, and `exchangeRate`. A checkout uses
      * {@see checkoutBalances()} instead, which can leave out its own hold.
      *
+     * A connected site's token cannot use this: Siren Cloud refuses the
+     * computed field it reads with a 403.
+     *
      * @return array<int|string, mixed>
      */
     public function balances(int $collaboratorId): array
@@ -101,8 +109,10 @@ final class Credits
     /**
      * A collaborator's store credit with `GET /credit-balances`, the read a
      * checkout makes, one row per internal currency: `{collaboratorId, currency, balance, reserved,
-     * available}`. `balance` is the ledger sum, `reserved` the live holds,
-     * and `available` the balance less reserved, never below zero.
+     * available, held}`. `balance` is the ledger sum, `reserved` the live holds,
+     * and `available` the balance less reserved, never below zero. `held` is
+     * credit a store's migration imported that waits for an admin's
+     * approval. It is not part of the balance and cannot be spent.
      *
      * Pass `$currency` for one currency. Pass the checkout's own hold
      * reference ({@see holdReference()}) as `$excludeReference` so a
@@ -215,7 +225,7 @@ final class Credits
      * @return array<string, mixed> The hold.
      *
      * @throws HoldConflictException When no credit is available, or another site's checkout used the token. See {@see HoldConflictException::getReason()}.
-     * @throws HoldLimitException    When the collaborator already holds credit for ten other live checkouts on this site.
+     * @throws HoldLimitException    Only from an older Siren deployment that capped a collaborator at ten live checkouts on one site. Current Siren has no cap.
      */
     public function placeHold(int $collaboratorId, string $currency, int $amount, string $token, string $platformId, ?int $ttl = null): array
     {
