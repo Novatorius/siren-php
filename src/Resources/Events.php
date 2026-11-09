@@ -60,9 +60,15 @@ final class Events
     }
 
     /**
-     * Reverses a previously recorded sale, matched by `(externalId, source)`.
+     * Records a refund of a previously recorded sale, matched by
+     * `(externalId, source)`.
      *
-     * Required: `source`, `externalId` — both must match the original sale.
+     * Required: `source` and `externalId`, which must match the original sale,
+     * and `refundId`, the store's own id for this refund, such as WooCommerce
+     * refund 2201. `externalId` names the order and `refundId` names one
+     * refund of it. Siren records each refund id once per order, so sending
+     * the same refund again is safe. Optional: `amount`, `currency`, `lines`,
+     * `whole` and `kind`, as the refund event takes them.
      * Throws {@see \Siren\Sdk\Exception\NotFoundException} when no matching
      * sale exists. A refund sent while the engine is paused is queued and
      * answers 202 without that check.
@@ -71,7 +77,7 @@ final class Events
      */
     public function refund(array $params): EventResult
     {
-        $this->requireFields($params, ['source', 'externalId'], 'events->refund()');
+        $this->requireFields($params, ['source', 'externalId', 'refundId'], 'events->refund()');
 
         return $this->send('refund', $params);
     }

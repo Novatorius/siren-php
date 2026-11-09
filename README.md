@@ -71,12 +71,17 @@ such as when it is over its usage threshold. The event is queued and runs
 once the engine resumes, so `$result->isQueued()` is true and the event must
 not be sent again.
 
-Refunds reverse a sale by `(externalId, source)`:
+Refunds name the sale by `(externalId, source)` and the refund by `refundId`,
+your store's own id for this refund. Siren records each refund id once per
+order, so sending the same refund again is safe. Leave out `amount` and
+`lines` to refund the whole order:
 
 ```php
 $siren->events->refund([
     'source'     => 'stripe',
-    'externalId' => 'cs_test_a1b2c3',
+    'externalId' => 'cs_test_a1b2c3',  // the order
+    'refundId'   => 're_3Nf8a2',        // this refund, required
+    'amount'     => 12.50,              // optional: refund part of the order
 ]);
 ```
 

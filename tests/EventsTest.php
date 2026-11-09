@@ -105,12 +105,12 @@ final class EventsTest extends TestCase
     {
         $siren = $this->mockSiren([self::jsonResponse(200, [], ['X-Siren-OID' => '99'])]);
 
-        $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'cs_test_a1b2c3']);
+        $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'cs_test_a1b2c3', 'refundId' => 're_2201']);
 
         $request = $this->lastRequest();
         $this->assertSame('POST', $request->getMethod());
         $this->assertSame('https://api.sirenaffiliates.com/siren/v1/event/refund', (string) $request->getUri());
-        $this->assertSame(['source' => 'stripe', 'externalId' => 'cs_test_a1b2c3'], $this->lastRequestJson());
+        $this->assertSame(['source' => 'stripe', 'externalId' => 'cs_test_a1b2c3', 'refundId' => 're_2201'], $this->lastRequestJson());
         $this->assertSame(99, $result->getOpportunityId());
     }
 
@@ -120,7 +120,21 @@ final class EventsTest extends TestCase
 
         $this->expectException(\InvalidArgumentException::class);
 
-        $siren->events->refund(['source' => 'stripe']);
+        $siren->events->refund(['source' => 'stripe', 'refundId' => 're_2201']);
+    }
+
+    /**
+     * Siren refuses a refund without the store's own id for it, so the SDK
+     * stops it before it is sent.
+     */
+    public function testRefundRequiresRefundId(): void
+    {
+        $siren = $this->mockSiren([]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('refundId');
+
+        $siren->events->refund(['source' => 'stripe', 'externalId' => 'cs_test_a1b2c3']);
     }
 
     public function testSiteVisitedPostsToEventSiteVisited(): void
@@ -308,7 +322,7 @@ final class EventsTest extends TestCase
     {
         $siren = $this->mockSiren([self::jsonResponse(200)]);
 
-        $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1']);
+        $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1', 'refundId' => 're_1']);
 
         $this->assertNull($result->getStatus());
         $this->assertSame([], $result->toArray());
@@ -319,7 +333,7 @@ final class EventsTest extends TestCase
     {
         $siren = $this->mockSiren([self::jsonResponse(200, [], ['X-Siren-OID' => '1e3'])]);
 
-        $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1']);
+        $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1', 'refundId' => 're_1']);
 
         $this->assertNull($result->getOpportunityId());
     }

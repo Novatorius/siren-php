@@ -135,7 +135,7 @@ final class ErrorHandlingTest extends TestCase
 
         $this->expectException(NotFoundException::class);
 
-        $siren->events->refund(['source' => 'stripe', 'externalId' => 'missing-order']);
+        $siren->events->refund(['source' => 'stripe', 'externalId' => 'missing-order', 'refundId' => 're_1']);
     }
 
     public function testValidationExceptionExposesFieldErrors(): void
