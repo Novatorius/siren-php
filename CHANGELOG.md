@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- `events->refund()` requires `refundId`, the store's own id for the refund,
+  such as WooCommerce refund 2201. Siren now refuses a refund without one with
+  400, so the SDK throws `InvalidArgumentException` before sending it. Siren
+  records each refund id once per order, so sending the same refund again is
+  safe, and two refunds of one order with different ids are both recorded.
+
 ## [0.3.0] - 2026-10-19
 
 This is a minor bump, because the changes below break existing callers. Each

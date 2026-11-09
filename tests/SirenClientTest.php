@@ -42,7 +42,7 @@ final class SirenClientTest extends TestCase
     {
         $siren = $this->mockSiren([self::jsonResponse(200)]);
 
-        $siren->events->refund(['source' => 'stripe', 'externalId' => 'order-1']);
+        $siren->events->refund(['source' => 'stripe', 'externalId' => 'order-1', 'refundId' => 're_1']);
 
         $request = $this->lastRequest();
         $this->assertSame('application/json', $request->getHeaderLine('Content-Type'));

@@ -34,7 +34,7 @@ final class BackwardCompatibilityTest extends TestCase
             self::jsonResponse(200, ['items' => [], 'total' => 0, 'page' => 1, 'perPage' => 10, 'totalPages' => 1]),
         ]);
 
-        $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1']);
+        $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1', 'refundId' => 're_1']);
         $siren->apiKeys->list();
         $siren->webhooks->subscriptions->create(['targetUrl' => 'https://example.test/hook', 'events' => ['*']]);
         $siren->collaborators->list();
