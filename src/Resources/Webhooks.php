@@ -24,7 +24,7 @@ final class Webhooks
     /** The header that carries the delivery id, the same on every retry of one delivery. */
     public const DELIVERY_HEADER = 'X-Siren-Delivery';
 
-    /** Manage webhook subscriptions: `create`, `list`, `delete`. */
+    /** Manage webhook subscriptions: `create`, `list`, `events`, `retrieve`, `update`, `test`, `deliveries`, `delete`. */
     public readonly WebhookSubscriptions $subscriptions;
 
     public function __construct(HttpTransport $transport)

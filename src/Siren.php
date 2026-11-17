@@ -18,9 +18,11 @@ use Siren\Sdk\Resources\CustomCurrencies;
 use Siren\Sdk\Resources\Distributors;
 use Siren\Sdk\Resources\Engagements;
 use Siren\Sdk\Resources\Events;
+use Siren\Sdk\Resources\Fulfillments;
 use Siren\Sdk\Resources\ListResource;
 use Siren\Sdk\Resources\Mappings;
 use Siren\Sdk\Resources\Opportunities;
+use Siren\Sdk\Resources\Payouts;
 use Siren\Sdk\Resources\ProgramGroups;
 use Siren\Sdk\Resources\Programs;
 use Siren\Sdk\Resources\Settings;
@@ -87,14 +89,22 @@ class Siren
     public readonly ListResource $obligations;
 
     /**
-     * Reconciliation reader for `GET /payouts`. Filters: `id`,
-     * `fulfillmentId`, `collaboratorId`, `status`, `currency`. A connected
-     * site must send `id`, `collaboratorId` or `fulfillmentId`, or Siren
-     * Cloud answers 403 with `site_filter_required`. An API key needs
+     * Payouts: the reconciliation reader for `GET /payouts`, and `retrieve`
+     * for one payout. Filters: `id`, `fulfillmentId`, `collaboratorId`,
+     * `status`, `currency`. A connected site must send `id`,
+     * `collaboratorId` or `fulfillmentId`, or Siren Cloud answers 403 with
+     * `site_filter_required`. An API key needs
      * {@see ApiKeyScope::LEDGER_PAYOUTS_READ}, and must be
      * organization-wide, because payouts are not kept by store.
      */
-    public readonly ListResource $payouts;
+    public readonly Payouts $payouts;
+
+    /**
+     * Fulfillments, the batches Siren pays payouts in: `list` and
+     * `retrieve`. An API key needs {@see ApiKeyRecordScope::FULFILLMENTS_READ},
+     * and must be organization-wide.
+     */
+    public readonly Fulfillments $fulfillments;
 
     /** Collaborators, with their tracking codes (`->aliases`) and program enrollments (`->enrollments`). */
     public readonly Collaborators $collaborators;
@@ -163,7 +173,8 @@ class Siren
         $this->conversions = new Conversions($transport);
         $this->transactions = new Transactions($transport);
         $this->obligations = new ListResource($transport, '/obligations');
-        $this->payouts = new ListResource($transport, '/payouts');
+        $this->payouts = new Payouts($transport);
+        $this->fulfillments = new Fulfillments($transport);
         $this->collaborators = new Collaborators($transport);
         $this->programs = new Programs($transport);
         $this->programGroups = new ProgramGroups($transport);
