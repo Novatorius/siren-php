@@ -50,10 +50,12 @@ final class WebhookSubscriptions
      * deliveries and `'active'` starts them again.
      *
      * Sends a new array holding only the {@see UPDATE_FIELDS} that `$params`
-     * gives, and throws `InvalidArgumentException` before sending when
-     * `$params` holds any other key, whatever its value. Siren answers 400,
-     * raised as {@see \Siren\Sdk\Exception\BadRequestException}, for a target
-     * URL that is not a public https endpoint.
+     * gives. Throws `InvalidArgumentException` before sending when `$params`
+     * holds any other key, whatever its value, and when it holds no field
+     * that is not null. Siren skips a null field, and an update with nothing
+     * left to change fails there with a 500. Siren answers 400, raised as
+     * {@see \Siren\Sdk\Exception\BadRequestException}, for a target URL that
+     * is not a public https endpoint.
      *
      * Never auto-retried. Sending the same update again after a lost answer
      * sets the same values, so the caller may repeat it.
@@ -76,6 +78,12 @@ final class WebhookSubscriptions
             }
 
             $body[$key] = $value;
+        }
+
+        if (array_filter($body, static fn (mixed $value): bool => $value !== null) === []) {
+            throw new \InvalidArgumentException(
+                'webhooks->subscriptions->update() needs at least one of targetUrl, events, status or description that is not null. Siren skips a null field and cannot apply an update with nothing to change.',
+            );
         }
 
         return $this->transport->request('PUT', $path, $body, [], retryable: false)->json();
