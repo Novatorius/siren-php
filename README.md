@@ -151,7 +151,9 @@ answer. Both take `webhook-subscriptions:read` or
 
 `update($id, $params)` changes the target URL, the events, the status or the
 description, and sends only the fields you give. Any other key throws
-`InvalidArgumentException` before sending. `test($id)` makes Siren send one
+`InvalidArgumentException` before sending. So does an update with no field
+that is not `null`, because Siren skips a `null` field and cannot apply an
+update with nothing to change. `test($id)` makes Siren send one
 signed `webhook.test` delivery now and answers what your endpoint did. Siren
 answers 200 either way, so read `delivered`. Both take
 `webhook-subscriptions:manage`, and each is sent once.
@@ -631,10 +633,8 @@ $checkoutSiren = new Siren([
 
 This SDK and the Node SDK, `@novatorius/siren`, carry the same calls under
 the same names. The Node SDK gained the calls below first, for services a
-customer hosts, and this SDK follows it. This section is the design note for
-them. It follows Siren's source at `20c47873d` (`saas/Auth/ApiKeyRoutes.php`
-and the controllers it names) and the Node SDK's `feat/apps` branch at
-`fb57137`.
+customer hosts, and this SDK follows it. The routes and scopes below follow
+Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 
 | PHP | Node | Siren route | API key scope |
 |-----|------|-------------|---------------|
@@ -658,7 +658,7 @@ the subscription calls sit on `WebhookSubscriptions` beside `create`, `list`,
 | `fulfillments->list` | yes | a `payoutStatus` or `currency` of `""` or not a string, and a `from` or `to` that is not a real `YYYY-MM-DD` day |
 | `fulfillments->retrieve` | yes | an id below 1 |
 | `webhooks->subscriptions->retrieve` | yes | an id below 1 |
-| `webhooks->subscriptions->update` | no | an id below 1, and any key outside `UPDATE_FIELDS` whatever its value |
+| `webhooks->subscriptions->update` | no | an id below 1, any key outside `UPDATE_FIELDS` whatever its value, and an update with no field that is not `null` |
 | `webhooks->subscriptions->test` | no | an id below 1 |
 | `webhooks->subscriptions->deliveries` | yes | an id below 1 |
 
@@ -679,13 +679,24 @@ The PHP SDK keeps its own rules where they already differ from Node's:
   keys, `propertyId` included, an empty filter list, and a comma in a
   filter.
 - A 2xx answer of the wrong shape is read as PHP reads every answer. A body
-  that is not JSON gives `[]`, and a list drops a row that is not an array,
-  as `events()` does. Node raises `UnexpectedResponseError` for each.
+  that is not a JSON array or object gives `[]`. `deliveries()` keeps each
+  member of what it decoded that is an array, as `events()` does, so it
+  drops a row that is not an array and reads each array member of a JSON
+  object as a row. Node raises `UnexpectedResponseError` for each.
 - `retrieve` on payouts and fulfillments passes any key as a query
   parameter. Node sends only `fields`, `include` and `propertyId`.
 - `ApiKeyRecordScope` keeps Siren's constant names, such as
   `FULFILLMENTS_READ`, where Node writes them in Pascal case, such as
   `FulfillmentsRead`.
+
+`webhooks->subscriptions->update()` refuses any key outside `UPDATE_FIELDS`,
+as Node does. This is the PHP SDK's rule for a write that holds the list of
+fields its route reads, the rule `collaborators->updateDetails()` follows
+with `SITE_UPDATABLE_FIELDS`. The other PHP `update()` methods hold no such
+list, so they send the array as given. Refusing here keeps a key such as
+`signingSecret` or `propertyId` out of the body, where Siren would ignore it
+and the caller would think it changed. Both SDKs also refuse an update with
+no field that is not `null`, because Siren cannot apply it and answers 500.
 
 `tests/ApiKeyRecordScopeTest.php` pins the thirty scope strings. Run it with
 `SIREN_CHECKOUT` set to a Siren checkout and it also loads Siren's
@@ -696,9 +707,10 @@ The other tests in `tests/Resources/PayoutsFulfillmentsTest.php` and
 real transport to a recording `HttpClient`, with answers written from
 Siren's source rather than captured from a running Siren.
 
-Left open: `events->forward`, `conversions->recoverCreate` and
-`transactions->recoverCreditCollaborator` are still Node only, and neither
-SDK reads one obligation by id, though Siren serves `GET /obligations/{id}`.
+`events->forward`, `conversions->recoverCreate` and
+`transactions->recoverCreditCollaborator` are still only in the Node SDK.
+Neither SDK reads one obligation by id, though Siren serves
+`GET /obligations/{id}`.
 
 ## Other SDKs
 

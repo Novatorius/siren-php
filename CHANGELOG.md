@@ -30,7 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `webhooks->subscriptions->update($id, $params)` changes a subscription with
   `PUT /webhooks/{id}`. It sends only `targetUrl`, `events`, `status` and
   `description`, named in `WebhookSubscriptions::UPDATE_FIELDS`, and throws
-  `InvalidArgumentException` before sending for any other key.
+  `InvalidArgumentException` before sending for any other key, and for an
+  update with no field that is not `null`, since Siren skips a `null` field
+  and answers 500 when nothing is left to change.
   `webhooks->subscriptions->test($id)` sends one signed test delivery with
   `POST /webhooks/{id}/test` and answers what the endpoint did. Both take
   `webhook-subscriptions:manage`, and each is sent once.
