@@ -182,6 +182,51 @@ final class WebhookSubscriptionCallsTest extends TestCase
         $this->assertSame([], $this->http->requests);
     }
 
+    /**
+     * UpdateWebhookSubscription.php skips a null field, so each of these
+     * leaves Siren nothing to set.
+     *
+     * @return array<string, array{0: array<string, mixed>}>
+     */
+    public static function updatesWithNothingToChange(): array
+    {
+        return [
+            'no field' => [[]],
+            'one null field' => [['description' => null]],
+            'every field null' => [['targetUrl' => null, 'events' => null, 'status' => null, 'description' => null]],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('updatesWithNothingToChange')]
+    public function testUpdateRefusesAnUpdateWithNothingToChangeBeforeSending(array $params): void
+    {
+        $siren = $this->hostSiren([]);
+
+        try {
+            $siren->webhooks->subscriptions->update(12, $params);
+            $this->fail('Expected an InvalidArgumentException.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertSame(
+                'webhooks->subscriptions->update() needs at least one of targetUrl, events, status or description that is not null. Siren skips a null field and cannot apply an update with nothing to change.',
+                $e->getMessage(),
+            );
+        }
+
+        $this->assertSame([], $this->http->requests);
+    }
+
+    public function testUpdateSendsANullFieldBesideOneThatChanges(): void
+    {
+        $siren = $this->hostSiren([self::hostJson(200, self::SUBSCRIPTION)]);
+
+        $siren->webhooks->subscriptions->update(12, ['status' => 'active', 'description' => null]);
+
+        $this->assertSame(['status' => 'active', 'description' => null], $this->sentJson());
+    }
+
     public function testUpdateRaisesBadRequestForATargetSirenRefuses(): void
     {
         $siren = $this->hostSiren([self::hostJson(400, ['error' => ['message' => 'The target URL must be a public https endpoint.', 'context' => []]])]);
