@@ -140,13 +140,48 @@ $secret = $subscription['signingSecret'];
 $siren->webhooks->subscriptions->events(); // the live catalog: [{event, category, label}, ...]
 ```
 
+### Check and change a subscription
+
+`retrieve($id)` reads one subscription, never with its signing secret, and
+`deliveries($id)` reads its latest 50 deliveries, newest first. Each delivery
+carries the payload Siren sent, its status (`pending`, `delivered` or
+`failed`), the tries it took and the first 200 bytes of your endpoint's
+answer. Both take `webhook-subscriptions:read` or
+`webhook-subscriptions:manage`, and both retry as reads.
+
+`update($id, $params)` changes the target URL, the events, the status or the
+description, and sends only the fields you give. Any other key throws
+`InvalidArgumentException` before sending. `test($id)` makes Siren send one
+signed `webhook.test` delivery now and answers what your endpoint did. Siren
+answers 200 either way, so read `delivered`. Both take
+`webhook-subscriptions:manage`, and each is sent once.
+
+```php
+$result = $siren->webhooks->subscriptions->test($subscription['id']);
+
+if (!$result['delivered']) {
+    $latest = $siren->webhooks->subscriptions->deliveries($subscription['id'])[0] ?? null;
+    error_log(sprintf('%s %s', $latest['httpStatusCode'] ?? '-', $latest['responseBody'] ?? ''));
+}
+
+// Stop deliveries while you fix the endpoint, then start them again.
+$siren->webhooks->subscriptions->update($subscription['id'], ['status' => WebhookSubscriptionStatus::PAUSED]);
+$siren->webhooks->subscriptions->update($subscription['id'], ['status' => WebhookSubscriptionStatus::ACTIVE]);
+```
+
+Siren refuses a test for a paused subscription with a 409, raised as
+`ConflictException`. From one address it allows 20 tests an hour for one
+subscription and 60 in all, and answers more with a 429, raised as
+`RateLimitException`.
+
 ### Which credential does each call need?
 
 | Calls | Credential |
 |-------|------------|
 | `events` | An API key holding the event's scope (`event:*`, or `event:{slug}`). A connected site's token sends only the events its integrations forward and `site-visited`. |
 | `conversions`, `transactions`, `obligations` and `payouts`: `list()`, and `retrieve()` where the SDK has it | An API key holding the matching ledger scope, such as `ledger:conversions:read`. A dashboard session's access token, or a connected site's token, also works. |
-| `webhooks->subscriptions` | An API key holding `webhook-subscriptions:read` for `list()` and `events()`, or `webhook-subscriptions:manage` for every call. A dashboard session's access token also works. |
+| `fulfillments`: `list()` and `retrieve()` | An API key holding `ledger:fulfillments:read` (`ApiKeyRecordScope::FULFILLMENTS_READ`). A dashboard session's access token also works. |
+| `webhooks->subscriptions` | An API key holding `webhook-subscriptions:read` for `list()`, `events()`, `retrieve()` and `deliveries()`, or `webhook-subscriptions:manage` for every call. A dashboard session's access token also works. |
 | `apiKeys` | A signed-in dashboard session's access token. No API key scope reaches them. |
 | Other record resources, and the writes on `conversions` and `transactions` | A dashboard session's access token, or a connected site's token on the routes Siren Cloud opens to connectors. See [Connected sites](#connected-sites). |
 
@@ -172,19 +207,47 @@ $key = $siren->apiKeys->create([
 | `ApiKeyScope::LEDGER_CONVERSIONS_READ` | `conversions->list()`, `conversions->retrieve()` |
 | `ApiKeyScope::LEDGER_TRANSACTIONS_READ` | `transactions->list()`, `transactions->retrieve()` |
 | `ApiKeyScope::LEDGER_OBLIGATIONS_READ` | `obligations->list()` |
-| `ApiKeyScope::LEDGER_PAYOUTS_READ` | `payouts->list()` |
-| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ` | `webhooks->subscriptions->list()`, `events()` |
-| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE` | Every `webhooks->subscriptions` call, and a test delivery (`POST /webhooks/{id}/test`, which the SDK has no method for) |
+| `ApiKeyScope::LEDGER_PAYOUTS_READ` | `payouts->list()`, `payouts->retrieve()` |
+| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ` | `webhooks->subscriptions->list()`, `events()`, `retrieve()`, `deliveries()` |
+| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE` | Every `webhooks->subscriptions` call, `update()` and `test()` included |
 
-Siren grants the ledger and webhook scopes only by their exact names. `*`,
-`event:*`, wildcards such as `ledger:*`, and older names such as
+`ApiKeyRecordScope` names all thirty record scopes Siren issues, in the order
+the dashboard offers them, and `ApiKeyRecordScope::ALL` lists them. Each
+constant has the name Siren's own `ApiKeyRecordScopes` gives it, so
+`ApiKeyRecordScope::FULFILLMENTS_READ` is `ledger:fulfillments:read`. The six
+ledger and webhook scopes above carry the same strings under both classes.
+
+| Group | `ApiKeyRecordScope` constants |
+|-------|-------------------------------|
+| The ledger, read only | `ENGAGEMENTS_READ`, `OPPORTUNITIES_READ`, `CONVERSIONS_READ`, `TRANSACTIONS_READ`, `OBLIGATIONS_READ`, `FULFILLMENTS_READ`, `PAYOUTS_READ` |
+| Webhook subscriptions | `WEBHOOKS_READ`, `WEBHOOKS_MANAGE` |
+| Records a merchant sets up | `PRODUCTS_READ`, `PRODUCTS_MANAGE`, `COUPONS_READ`, `COUPONS_MANAGE`, `COLLABORATORS_READ`, `COLLABORATORS_MANAGE`, `COLLABORATOR_GROUPS_READ`, `COLLABORATOR_GROUPS_MANAGE`, `PROGRAMS_READ`, `PROGRAMS_MANAGE`, `PROGRAM_GROUPS_READ`, `PROGRAM_GROUPS_MANAGE`, `DISTRIBUTORS_READ`, `DISTRIBUTORS_MANAGE`, `APPLICATION_FORMS_READ`, `APPLICATION_FORMS_MANAGE`, `APPLICATIONS_READ`, `APPLICATIONS_MANAGE`, `NOTIFICATION_RULES_READ`, `NOTIFICATION_RULES_MANAGE`, `PROPERTIES_READ` |
+
+A manage scope reads everything its read scope reads.
+
+```php
+use Siren\Sdk\ApiKeyRecordScope;
+
+$key = $siren->apiKeys->create([
+    'label'  => 'Payout app',
+    'scopes' => [
+        ApiKeyRecordScope::PAYOUTS_READ,
+        ApiKeyRecordScope::FULFILLMENTS_READ,
+        ApiKeyRecordScope::WEBHOOKS_MANAGE,
+    ],
+]);
+```
+
+Siren grants the ledger, webhook and record scopes only by their exact names.
+`*`, `event:*`, wildcards such as `ledger:*`, and older names such as
 `conversions:read` grant none of them, so a key made before these scopes
 existed reads nothing until you replace it with one that holds them. A key's
 requests count against the organization's API rate limit.
 
 A key created with a `propertyId` is bound to that store. It reads only its
 own store's conversions, transactions and obligations, and Siren refuses it on
-payouts and webhook subscriptions with `StoreKeyNotAllowedException`. An
+payouts, fulfillments and webhook subscriptions with
+`StoreKeyNotAllowedException`. An
 organization-wide key reads the whole organization, and narrows a ledger read
 to one store with the `propertyId` filter:
 
@@ -200,14 +263,14 @@ $page = $siren->conversions->list(['propertyId' => 5, 'status' => ConversionStat
 
 - **Event ingestion** — `sale`, `refund`, `siteVisited`, and custom event types via `ingest`, with what Siren recorded (`EventStatus`) and whether it queued the event.
 - **Webhook verification** — one-call `constructEventFromHeaders` or `constructEvent`, plus a lower-level constant-time `verifySignature` boolean check.
-- **Subscription management** — create, list, and delete webhook subscriptions, and read the event catalog, with an API key or a dashboard session.
+- **Subscription management** — create, list, read, update, test, and delete webhook subscriptions, and read the event catalog and each subscription's deliveries, with an API key or a dashboard session.
 - **API key management** — create, list, and revoke keys, and read the scopes a key may hold.
-- **Reconciliation readers** — paginated iterators over conversions, transactions, obligations, and payouts, with an API key that holds the ledger scopes.
+- **Reconciliation readers** — paginated iterators over conversions, transactions, obligations, payouts, and fulfillments, with an API key that holds the ledger scopes.
 - **Record resources**: collaborators (with tracking codes and program enrollments), mappings, settings, programs, program groups, opportunities, transactions and their details, conversions, engagements, distributors, custom currencies, store credit, and collaborator groups. See [Records](#records).
 - **Host-supplied HTTP and tokens**: plug in your platform's HTTP client and an OAuth access token that refreshes after a 401. See [Connecting a host](#connecting-a-host).
 - **Automatic retries** — network errors, 429s, and 5xx are retried with exponential backoff on idempotent operations; management writes are never auto-retried.
 - **Typed exceptions** — every error extends `Siren\Sdk\Exception\SirenException` and carries the status code, error code, and error data.
-- **Typed taxonomy** — Siren's domain vocabulary as constants, so no magic strings cross the boundary: `WebhookEventType`, `EventSlug`, and the status vocabularies (`ConversionStatus`, `TransactionStatus`, `ObligationStatus`, `PayoutStatus`, `FulfillmentStatus`, `OpportunityStatus`, `ApiKeyStatus`, `WebhookSubscriptionStatus`, `CollaboratorStatus`, `ProgramStatus`, `DistributorStatus`), `EventStatus`, `ApiKeyScope`, plus `ProgramGroupSorter`, `CustomCurrencyType`, and a `BULK_*` constant for every bulk action.
+- **Typed taxonomy** — Siren's domain vocabulary as constants, so no magic strings cross the boundary: `WebhookEventType`, `EventSlug`, and the status vocabularies (`ConversionStatus`, `TransactionStatus`, `ObligationStatus`, `PayoutStatus`, `FulfillmentStatus`, `OpportunityStatus`, `ApiKeyStatus`, `WebhookSubscriptionStatus`, `CollaboratorStatus`, `ProgramStatus`, `DistributorStatus`), `EventStatus`, `ApiKeyScope`, `ApiKeyRecordScope`, plus `ProgramGroupSorter`, `CustomCurrencyType`, and a `BULK_*` constant for every bulk action.
 
 ```php
 use Siren\Sdk\ConversionStatus;
@@ -255,7 +318,7 @@ Webhook verification failures throw `SignatureVerificationException`.
 > dashboard session, and a connected site's OAuth token reaches the routes
 > Siren Cloud opens to connectors once the site holds the record scopes. See
 > [Connected sites](#connected-sites). An API key reads conversions,
-> transactions, obligations and payouts with a ledger scope. See
+> transactions, obligations, payouts and fulfillments with a ledger scope. See
 > [Which credential does each call need?](#which-credential-does-each-call-need)
 
 Every record resource follows the same shape: `list()`, `retrieve()`,
@@ -318,6 +381,8 @@ automatically.
 | `$siren->transactions` | list, retrieve, `details`, create, bulk, `creditCollaborator`, `sources` |
 | `$siren->conversions` | list, retrieve, create, update, delete, bulk, `types` |
 | `$siren->engagements` | list, retrieve, `types`, `calculations` |
+| `$siren->payouts` | list, retrieve |
+| `$siren->fulfillments` | list, retrieve |
 | `$siren->distributors` | list, retrieve, create, update, delete, bulk, `creditMetric` |
 | `$siren->customCurrencies` | list, retrieve, create, update, delete (keyed by currency code) |
 | `$siren->credits` | `checkoutBalances`, `checkoutBalance`, `entries`, `holds`, `placeHold`, `releaseHold`, `adjust`, `balances` |
@@ -346,6 +411,32 @@ $siren->transactions->details(901);                    // line items
 $siren->credits->adjust(42, 'PTS', -500, 'Redeemed at checkout');
 $siren->credits->balances(42);                         // the collaborator's creditBalances field
 ```
+
+Payouts and fulfillments only read, since every payout and fulfillment write
+moves money and Siren keeps those for a signed-in admin. A fulfillment is the
+batch Siren pays payouts in. `fulfillments->list()` reads `status`,
+`payoutStatus` (only fulfillments holding a payout in that status, so
+`failed` finds the ones that need attention), `currency`, and `from` and
+`to`, each a day as `YYYY-MM-DD`:
+
+```php
+use Siren\Sdk\PayoutStatus;
+
+$attention = $siren->fulfillments->list(['payoutStatus' => PayoutStatus::FAILED, 'from' => '2026-11-01']);
+
+foreach ($attention as $fulfillment) {
+    $batch = $siren->fulfillments->retrieve($fulfillment['id'], ['include' => 'extended']);
+    // $batch['payouts'] holds each payout, with its collaboratorName
+}
+
+$siren->payouts->retrieve(31, ['include' => 'extended']); // adds collaboratorName and collaboratorEmail
+```
+
+Siren reads a `payoutStatus` or `currency` of `""`, and a `from` or `to`
+that is not a real day, as no filter, and would answer every fulfillment. So
+`list()` throws `InvalidArgumentException` before sending for each of those,
+and for a `payoutStatus` or `currency` that is not a string, since Siren
+matches each as one value.
 
 ## Connecting a host
 
@@ -535,6 +626,79 @@ $checkoutSiren = new Siren([
     'maxRetries'  => 0,
 ]);
 ```
+
+## Parity with the Node SDK
+
+This SDK and the Node SDK, `@novatorius/siren`, carry the same calls under
+the same names. The Node SDK gained the calls below first, for services a
+customer hosts, and this SDK follows it. This section is the design note for
+them. It follows Siren's source at `20c47873d` (`saas/Auth/ApiKeyRoutes.php`
+and the controllers it names) and the Node SDK's `feat/apps` branch at
+`fb57137`.
+
+| PHP | Node | Siren route | API key scope |
+|-----|------|-------------|---------------|
+| `payouts->retrieve($id, $params)` | `payouts.retrieve(id, params)` | `GET /payouts/{id}` | `ledger:payouts:read` |
+| `fulfillments->list($params)` | `fulfillments.list(params)` | `GET /fulfillments` | `ledger:fulfillments:read` |
+| `fulfillments->retrieve($id, $params)` | `fulfillments.retrieve(id, params)` | `GET /fulfillments/{id}` | `ledger:fulfillments:read` |
+| `webhooks->subscriptions->retrieve($id)` | `webhooks.subscriptions.retrieve(id)` | `GET /webhooks/{id}` | `webhook-subscriptions:read` or `:manage` |
+| `webhooks->subscriptions->update($id, $params)` | `webhooks.subscriptions.update(id, params)` | `PUT /webhooks/{id}` | `webhook-subscriptions:manage` |
+| `webhooks->subscriptions->test($id)` | `webhooks.subscriptions.test(id)` | `POST /webhooks/{id}/test` | `webhook-subscriptions:manage` |
+| `webhooks->subscriptions->deliveries($id)` | `webhooks.subscriptions.deliveries(id)` | `GET /webhooks/{id}/deliveries` | `webhook-subscriptions:read` or `:manage` |
+| `ApiKeyRecordScope`, `ApiKeyRecordScope::ALL` | `ApiKeyRecordScope`, `API_KEY_RECORD_SCOPES` | none | none |
+
+Every route above takes an organization-wide key only. `Payouts` and
+`Fulfillments` extend `ListResource`, as the other record resources do, and
+the subscription calls sit on `WebhookSubscriptions` beside `create`, `list`,
+`events` and `delete`.
+
+| Call | Retried | Refused before sending |
+|------|---------|------------------------|
+| `payouts->retrieve` | yes | an id below 1 |
+| `fulfillments->list` | yes | a `payoutStatus` or `currency` of `""` or not a string, and a `from` or `to` that is not a real `YYYY-MM-DD` day |
+| `fulfillments->retrieve` | yes | an id below 1 |
+| `webhooks->subscriptions->retrieve` | yes | an id below 1 |
+| `webhooks->subscriptions->update` | no | an id below 1, and any key outside `UPDATE_FIELDS` whatever its value |
+| `webhooks->subscriptions->test` | no | an id below 1 |
+| `webhooks->subscriptions->deliveries` | yes | an id below 1 |
+
+A read retries on a lost connection, a 429 and a 5xx inside `maxRetries`. A
+write is sent once, apart from the one resend after a 401 that every request
+gets. `update` may be repeated by the caller after a lost answer, since it
+sets the same values. `test` makes Siren send a request each time, and Siren
+limits tests to 20 an hour for one subscription and 60 in all from one
+address.
+
+The PHP SDK keeps its own rules where they already differ from Node's:
+
+- A refusal is an `InvalidArgumentException`, where Node throws `SirenError`.
+  An id refusal says "Record ids are positive whole numbers.", as every PHP
+  resource does, where Node names the method.
+- `fulfillments->list()` sends every other key as a filter, as every PHP
+  list does. Node refuses a key outside its five filters and the paging
+  keys, `propertyId` included, an empty filter list, and a comma in a
+  filter.
+- A 2xx answer of the wrong shape is read as PHP reads every answer. A body
+  that is not JSON gives `[]`, and a list drops a row that is not an array,
+  as `events()` does. Node raises `UnexpectedResponseError` for each.
+- `retrieve` on payouts and fulfillments passes any key as a query
+  parameter. Node sends only `fields`, `include` and `propertyId`.
+- `ApiKeyRecordScope` keeps Siren's constant names, such as
+  `FULFILLMENTS_READ`, where Node writes them in Pascal case, such as
+  `FulfillmentsRead`.
+
+`tests/ApiKeyRecordScopeTest.php` pins the thirty scope strings. Run it with
+`SIREN_CHECKOUT` set to a Siren checkout and it also loads Siren's
+`lib/ApiKeys/Core/Enums/ApiKeyRecordScopes.php` and fails when a name, a
+value or the order differs. Without the variable that one test is skipped.
+The other tests in `tests/Resources/PayoutsFulfillmentsTest.php` and
+`tests/Resources/WebhookSubscriptionCallsTest.php` send each call through the
+real transport to a recording `HttpClient`, with answers written from
+Siren's source rather than captured from a running Siren.
+
+Left open: `events->forward`, `conversions->recoverCreate` and
+`transactions->recoverCreditCollaborator` are still Node only, and neither
+SDK reads one obligation by id, though Siren serves `GET /obligations/{id}`.
 
 ## Other SDKs
 

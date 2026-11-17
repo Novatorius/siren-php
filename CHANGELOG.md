@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `payouts->retrieve($id, $params)` reads one payout with `GET /payouts/{id}`.
+  It takes `fields` and `include` (`extended` adds the collaborator's name and
+  email), and an API key that holds `ledger:payouts:read`. `$siren->payouts`
+  is now a `Payouts` resource, which is still a `ListResource`, so `list()`
+  keeps passing every key as a filter.
+- `$siren->fulfillments`, a `Fulfillments` resource, reads the batches Siren
+  pays payouts in with an API key that holds `ledger:fulfillments:read`.
+  `list()` sends `GET /fulfillments` with the filters `status`,
+  `payoutStatus`, `currency`, `from` and `to`. It throws
+  `InvalidArgumentException` before sending for a `payoutStatus` or
+  `currency` of `""` or one that is not a string, and for a `from` or `to`
+  that is not a real `YYYY-MM-DD` day, because Siren reads each of those as
+  no filter or matches none. `retrieve($id, $params)` sends
+  `GET /fulfillments/{id}`, and `include => 'extended'` adds each payout.
+- `webhooks->subscriptions->retrieve($id)` reads one subscription with
+  `GET /webhooks/{id}`, and `deliveries($id)` reads its latest 50 deliveries,
+  newest first, with `GET /webhooks/{id}/deliveries`. Both take
+  `webhook-subscriptions:read` or `:manage`, and both retry as reads.
+- `webhooks->subscriptions->update($id, $params)` changes a subscription with
+  `PUT /webhooks/{id}`. It sends only `targetUrl`, `events`, `status` and
+  `description`, named in `WebhookSubscriptions::UPDATE_FIELDS`, and throws
+  `InvalidArgumentException` before sending for any other key.
+  `webhooks->subscriptions->test($id)` sends one signed test delivery with
+  `POST /webhooks/{id}/test` and answers what the endpoint did. Both take
+  `webhook-subscriptions:manage`, and each is sent once.
+- `ApiKeyRecordScope` names the thirty record scopes Siren issues, under the
+  constant names Siren's `ApiKeyRecordScopes` uses, and
+  `ApiKeyRecordScope::ALL` lists them in Siren's order.
+- Every call above throws `InvalidArgumentException` before sending for an id
+  below 1.
+- `openapi.yaml` describes `GET /payouts/{id}`, `GET /fulfillments`,
+  `GET /fulfillments/{id}`, `PUT /webhooks/{id}` and
+  `GET /webhooks/{id}/deliveries`, with the `WebhookSubscriptionUpdate` and
+  `WebhookDelivery` schemas.
+
 ## [0.3.0] - 2026-10-19
 
 This is a minor bump, because the changes below break existing callers. Each
