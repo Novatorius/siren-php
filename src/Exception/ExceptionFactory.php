@@ -30,7 +30,12 @@ final class ExceptionFactory
         if (is_array($body) && array_key_exists('error', $body)) {
             $error = $body['error'];
 
-            if (is_string($error) && $error !== '') {
+            if (is_string($error) && $error !== '' && is_string($body['error_description'] ?? null)) {
+                // The token route uses the OAuth envelope (RFC 6749, section
+                // 5.2): `error` is the code and `error_description` the message.
+                $message = $body['error_description'] !== '' ? $body['error_description'] : $error;
+                $code = $error;
+            } elseif (is_string($error) && $error !== '') {
                 $message = $error;
             } elseif (is_array($error)) {
                 if (is_string($error['message'] ?? null) && $error['message'] !== '') {

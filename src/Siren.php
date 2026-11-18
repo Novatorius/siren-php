@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk;
 
 use Siren\Sdk\Auth\AccessTokenSource;
+use Siren\Sdk\Auth\AppTokens;
 use Siren\Sdk\Auth\StaticAccessToken;
 use Siren\Sdk\Http\GuzzleHttpClient;
 use Siren\Sdk\Http\HttpClient;
@@ -58,6 +59,10 @@ use Siren\Sdk\Resources\Webhooks;
  *   {@see HttpClient} the host implements, or a preconfigured
  *   `GuzzleHttp\ClientInterface`. Without one, the SDK uses Guzzle when it
  *   is installed and PHP streams when it is not.
+ * - `tokenCache` — where the short-lived app tokens are kept between
+ *   requests, so every PHP worker shares them: a PSR-16
+ *   `Psr\SimpleCache\CacheInterface`, or false to keep them in memory only.
+ *   Without it the SDK uses APCu when it is on, and memory when it is not.
  */
 class Siren
 {
@@ -65,7 +70,7 @@ class Siren
     public const DEFAULT_TIMEOUT = 30.0;
     public const DEFAULT_MAX_RETRIES = 2;
 
-    /** Ingest commerce and tracking events: `sale`, `refund`, `siteVisited`, `ingest`. */
+    /** Send events: `sale`, `refund`, `siteVisited`, `ingest`, and browser tokens for a page's custom events. */
     public readonly Events $events;
 
     /** Verify inbound webhook signatures and manage subscriptions. */
@@ -148,6 +153,8 @@ class Siren
      *     maxRetries?: int,
      *     httpClient?: HttpClient|\GuzzleHttp\ClientInterface,
      *     sleeper?: callable(float): void,
+     *     clock?: callable(): float,
+     *     tokenCache?: \Psr\SimpleCache\CacheInterface|false,
      * } $config
      */
     public function __construct(array $config)
@@ -167,7 +174,7 @@ class Siren
             sleeper: $config['sleeper'] ?? null,
         );
 
-        $this->events = new Events($transport);
+        $this->events = new Events($transport, self::resolveAppTokens($config, $transport));
         $this->webhooks = new Webhooks($transport);
         $this->apiKeys = new ApiKeys($transport);
         $this->conversions = new Conversions($transport);
@@ -222,6 +229,31 @@ class Siren
         }
 
         return new StaticAccessToken($apiKey);
+    }
+
+    /**
+     * The app token source for a client built with a key. A client built
+     * with an access token sends with that token and never asks for one.
+     *
+     * @param array<string, mixed> $config
+     */
+    private static function resolveAppTokens(array $config, HttpTransport $transport): ?AppTokens
+    {
+        $apiKey = $config['apiKey'] ?? null;
+
+        if (!is_string($apiKey) || $apiKey === '') {
+            return null;
+        }
+
+        $cache = $config['tokenCache'] ?? null;
+
+        if ($cache !== null && $cache !== false && !$cache instanceof \Psr\SimpleCache\CacheInterface) {
+            throw new \InvalidArgumentException('The "tokenCache" option must be a Psr\SimpleCache\CacheInterface or false.');
+        }
+
+        $clock = $config['clock'] ?? null;
+
+        return new AppTokens($transport, $apiKey, is_callable($clock) ? $clock : null, $cache);
     }
 
     private static function resolveHttpClient(mixed $httpClient): HttpClient

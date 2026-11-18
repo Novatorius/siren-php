@@ -29,7 +29,7 @@ final class HttpTransport
 {
     public const SDK_VERSION = '0.3.0';
 
-    private string $baseUrl;
+    public readonly string $baseUrl;
     /** @var callable(float): void */
     private $sleeper;
 
@@ -51,6 +51,8 @@ final class HttpTransport
      * @param array<int|string, mixed>|null $json  JSON request body, or null for none.
      * @param array<string, mixed>          $query Query string parameters.
      * @param bool $retryable Whether network errors, 429s, and 5xx responses may be retried.
+     * @param string|false|null $bearer A token to send in place of the client's own, which is
+     *     not refreshed on a 401, or false to send no Authorization header at all.
      *
      * @throws \Siren\Sdk\Exception\SirenException
      */
@@ -60,6 +62,7 @@ final class HttpTransport
         ?array $json = null,
         array $query = [],
         bool $retryable = true,
+        string|false|null $bearer = null,
     ): ApiResponse {
         $url = $this->baseUrl . $path;
 
@@ -78,14 +81,17 @@ final class HttpTransport
             $body = json_encode($json, JSON_THROW_ON_ERROR);
         }
 
-        $token = $this->tokens->getAccessToken();
+        $token = $bearer ?? $this->tokens->getAccessToken();
         $request = new HttpRequest($method, $url, $headers, $body, $this->timeout);
         $attempt = 0;
-        $refreshed = false;
+        // A token the caller passed in is the caller's to replace.
+        $refreshed = $bearer !== null;
 
         while (true) {
             try {
-                $response = $this->client->send($request->withHeader('Authorization', 'Bearer ' . $token));
+                $response = $this->client->send(
+                    $token === false ? $request : $request->withHeader('Authorization', 'Bearer ' . $token),
+                );
             } catch (HttpClientException $e) {
                 if ($retryable && $attempt < $this->maxRetries) {
                     $this->backOff($attempt++);
@@ -107,7 +113,7 @@ final class HttpTransport
                 return new ApiResponse($status, $response->getHeaders(), $response->getBody());
             }
 
-            if ($status === 401 && !$refreshed) {
+            if ($status === 401 && !$refreshed && is_string($token)) {
                 $refreshed = true;
                 $fresh = $this->tokens->refreshAccessToken($token);
 

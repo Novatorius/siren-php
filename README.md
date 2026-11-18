@@ -176,11 +176,150 @@ Siren refuses a test for a paused subscription with a 409, raised as
 subscription and 60 in all, and answers more with a 429, raised as
 `RateLimitException`.
 
+### Send an app's custom event
+
+A custom event belongs to one app, and Siren takes only that app's short-lived
+token at its address. Build the client with the app's key and send. The SDK
+trades the key for a token the first time, keeps it, gets a new one when fewer
+than two minutes of its 20 are left, and on a 401 gets a new one and sends once
+more. You write no token code.
+
+<!-- readme-test: server-send -->
+```php
+<?php
+require 'vendor/autoload.php';
+
+use Siren\Sdk\Siren;
+
+$siren = new Siren([
+    'apiKey'  => getenv('SIREN_API_KEY'), // the app's key
+    'baseUrl' => getenv('SIREN_BASE_URL') ?: Siren::DEFAULT_BASE_URL,
+]);
+
+$result = $siren->events->ingest('signup-completed', [
+    'collaboratorId' => 12,
+    'plan'           => 'pro',
+]);
+
+echo $result->getStatus(), "\n";
+```
+
+`sale`, `refund`, `siteVisited` and every other call keep sending the key. A
+key that belongs to no app sends custom events with the key, and a client
+built with `accessToken` sends with that token.
+
+PHP forgets everything when a request ends, so the SDK keeps tokens in APCu
+when it is on, and every worker on the server shares them. On several servers,
+or without APCu, pass a PSR-16 cache such as Redis as `tokenCache`, or each
+request asks Siren for its own token. Siren allows 600 token requests an hour
+from one address.
+
+### Send a custom event from a browser
+
+A page never holds the app's key. It asks the app's own server for a browser
+token, which lasts ten minutes, works for one event only, and works only from
+a domain the event allows. Add the site's domain to the event in Siren first,
+because an event with no domains refuses every browser.
+
+Mount the token address on the app's server in one line. With no framework,
+put this in a file of its own, such as `siren-token.php`:
+
+<!-- readme-test: plain-handler -->
+```php
+<?php
+require 'vendor/autoload.php';
+
+use Siren\Sdk\Siren;
+
+$siren = new Siren([
+    'apiKey'  => getenv('SIREN_API_KEY'),
+    'baseUrl' => getenv('SIREN_BASE_URL') ?: Siren::DEFAULT_BASE_URL,
+]);
+
+$siren->events->serveBrowserToken(['events' => ['signup-completed']]);
+```
+
+With a framework that routes to a PSR-15 handler, such as Slim or Mezzio, use
+`browserTokenHandler()`. It needs `psr/http-server-handler`, and finds
+Guzzle's, Nyholm's, Slim's or Laminas's PSR-17 factories, or takes yours as
+`responseFactory` and `streamFactory`:
+
+<!-- readme-test: psr15-handler -->
+```php
+<?php
+require 'vendor/autoload.php';
+
+use Siren\Sdk\Siren;
+
+$siren = new Siren([
+    'apiKey'  => getenv('SIREN_API_KEY'),
+    'baseUrl' => getenv('SIREN_BASE_URL') ?: Siren::DEFAULT_BASE_URL,
+]);
+
+$handler = $siren->events->browserTokenHandler(['events' => ['signup-completed']]);
+
+// Slim 4:   $app->map(['GET', 'POST'], '/siren/token', $handler);
+// Mezzio:   $app->route('/siren/token', $handler, ['GET', 'POST']);
+```
+
+Either one reads the event from a JSON body `{"event": "..."}` or the query
+`?event=`, and answers:
+
+| Status | Body | When |
+|--------|------|------|
+| 200 | `{"token", "expiresIn", "url"}` | Siren gave a browser token. |
+| 400 | `{"error"}` | The request names no event, names one outside `events`, or Siren refuses the event (the app has no such event, or it allows no domain). |
+| 502 | `{"error"}` | Siren can't be reached, or refuses the app's key. |
+
+The handler reuses one token per event until fewer than 60 seconds are left,
+so a busy page costs one grant every nine minutes or so. In another framework,
+`(new BrowserTokenEndpoint($siren->events, ['events' => [...]]))->answer($body, $query)`
+returns the same status and body for you to send. `$siren->events->browserToken('signup-completed')`
+gives the `BrowserToken` itself.
+
+The page asks for the token, then posts the event's data to `url` with the
+token in the query:
+
+```html
+<script>
+async function sirenTrack(event, data) {
+  const asked = await fetch('/siren-token.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event }),
+  });
+  if (!asked.ok) return null;
+  const { token, url } = await asked.json();
+  const sent = await fetch(url + '?access_token=' + encodeURIComponent(token), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return sent.ok ? sent.json() : null;
+}
+
+sirenTrack('signup-completed', { plan: 'pro' });
+</script>
+```
+
+A page built with JavaScript tools can use `track()` from
+`@novatorius/siren/storefront`, which keeps the token and tries once more
+after a 401.
+
+This keeps other websites from firing the event from their visitors'
+browsers, and a leaked token dies within minutes. It does not stop a script
+outside a browser, which can send any `Origin`, and anyone who fetches a token
+from your page can send that event for ten minutes. A browser send carries
+whatever the page's script puts in it, so don't let a page name who gets
+credit unless you check it on your server.
+
+The [examples](examples) folder holds each of these as a file.
+
 ### Which credential does each call need?
 
 | Calls | Credential |
 |-------|------------|
-| `events` | An API key holding the event's scope (`event:*`, or `event:{slug}`). A connected site's token sends only the events its integrations forward and `site-visited`. |
+| `events` | An API key holding the event's scope (`event:*`, or `event:{slug}`). A connected site's token sends only the events its integrations forward and `site-visited`. A custom event takes only its app's short-lived token, which the SDK gets from the app's key. See [Send an app's custom event](#send-an-apps-custom-event). |
 | `conversions`, `transactions`, `obligations` and `payouts`: `list()`, and `retrieve()` where the SDK has it | An API key holding the matching ledger scope, such as `ledger:conversions:read`. A dashboard session's access token, or a connected site's token, also works. |
 | `fulfillments`: `list()` and `retrieve()` | An API key holding `ledger:fulfillments:read` (`ApiKeyRecordScope::FULFILLMENTS_READ`). A dashboard session's access token also works. |
 | `webhooks->subscriptions` | An API key holding `webhook-subscriptions:read` for `list()`, `events()`, `retrieve()` and `deliveries()`, or `webhook-subscriptions:manage` for every call. A dashboard session's access token also works. |
@@ -264,6 +403,7 @@ $page = $siren->conversions->list(['propertyId' => 5, 'status' => ConversionStat
 ## Features
 
 - **Event ingestion** — `sale`, `refund`, `siteVisited`, and custom event types via `ingest`, with what Siren recorded (`EventStatus`) and whether it queued the event.
+- **App tokens** — `ingest` trades the app's key for a short-lived token and keeps it fresh, and `browserTokenHandler()` or `serveBrowserToken()` gives a page a browser token for one event.
 - **Webhook verification** — one-call `constructEventFromHeaders` or `constructEvent`, plus a lower-level constant-time `verifySignature` boolean check.
 - **Subscription management** — create, list, read, update, test, and delete webhook subscriptions, and read the event catalog and each subscription's deliveries, with an API key or a dashboard session.
 - **API key management** — create, list, and revoke keys, and read the scopes a key may hold.
@@ -289,10 +429,13 @@ $siren = new Siren([
     'timeout'    => 30,                                         // seconds, default 30
     'maxRetries' => 2,                                          // default 2
     'httpClient' => $client,                                    // optional, see below
+    'tokenCache' => $psr16Cache,                                // optional, default APCu when on
 ]);
 ```
 
-Pass `apiKey` or `accessToken`, not both. `httpClient` takes a
+Pass `apiKey` or `accessToken`, not both. `tokenCache` keeps app tokens
+between requests: a PSR-16 `Psr\SimpleCache\CacheInterface`, or `false` for
+memory only. `httpClient` takes a
 `Siren\Sdk\Http\HttpClient` or a preconfigured `GuzzleHttp\ClientInterface`.
 
 ### Errors
@@ -646,8 +789,15 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `webhooks->subscriptions->test($id)` | `webhooks.subscriptions.test(id)` | `POST /webhooks/{id}/test` | `webhook-subscriptions:manage` |
 | `webhooks->subscriptions->deliveries($id)` | `webhooks.subscriptions.deliveries(id)` | `GET /webhooks/{id}/deliveries` | `webhook-subscriptions:read` or `:manage` |
 | `ApiKeyRecordScope`, `ApiKeyRecordScope::ALL` | `ApiKeyRecordScope`, `API_KEY_RECORD_SCOPES` | none | none |
+| `events->ingest($slug, $payload)` | `siren.events.ingest(slug, payload)` | `POST /oauth/token`, then `POST /event/{slug}` | the app's key, traded for a token |
+| `events->browserToken($eventKey)` | `siren.events.browserToken(eventKey)` | `POST /oauth/token` with `scope=browser:{eventKey}` | the app's key |
+| `events->browserTokenHandler($options)`, `events->serveBrowserToken($options)` | `siren.events.browserTokenHandler(options)` | `POST /oauth/token` | the app's key |
 
-Every route above takes an organization-wide key only. `Payouts` and
+Every route above but the token route takes an organization-wide key only.
+Node's handler takes Node's `(req, res)` or a Web `Request`. PHP's comes as a
+PSR-15 handler and as `serveBrowserToken()` for plain PHP, and PHP keeps
+tokens in APCu or the `tokenCache` you pass, since a PHP request keeps nothing
+in memory for the next one. `Payouts` and
 `Fulfillments` extend `ListResource`, as the other record resources do, and
 the subscription calls sit on `WebhookSubscriptions` beside `create`, `list`,
 `events` and `delete`.

@@ -15,6 +15,14 @@ if (preg_match('#/status/(\d{3})(/|$)#', $path, $matches) === 1) {
     return true;
 }
 
+// The token route, so a custom event can trade the key for an app token.
+if (str_ends_with($path, '/oauth/token')) {
+    header('Content-Type: application/json');
+    echo json_encode(['access_token' => 'echo.app.token', 'token_type' => 'Bearer', 'expires_in' => 1200]);
+
+    return true;
+}
+
 if (str_ends_with($path, '/redirect')) {
     header('Location: /siren/v1/echo', true, 302);
 

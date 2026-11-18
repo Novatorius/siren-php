@@ -34,10 +34,16 @@
         "guzzlehttp/guzzle": "^7.8",
         "phpnomad/phpstan-rules": "^2.1",
         "phpstan/phpstan": "^2.1",
-        "phpunit/phpunit": "^10.5"
+        "phpunit/phpunit": "^10.5",
+        "psr/http-factory": "^1.0",
+        "psr/http-server-handler": "^1.0",
+        "psr/simple-cache": "^3.0"
     },
     "suggest": {
-        "guzzlehttp/guzzle": "The default HTTP client when installed (^7.8). Without it the SDK uses PHP streams, or the HttpClient you pass as the httpClient option."
+        "guzzlehttp/guzzle": "The default HTTP client when installed (^7.8). Without it the SDK uses PHP streams, or the HttpClient you pass as the httpClient option.",
+        "ext-apcu": "Keeps app tokens between requests, so every PHP worker on a server shares one token.",
+        "psr/http-server-handler": "For events->browserTokenHandler(), the browser token address as a PSR-15 handler.",
+        "psr/simple-cache": "For the tokenCache option, which keeps app tokens in a cache every server shares, such as Redis."
     },
     "autoload": {
         "psr-4": {

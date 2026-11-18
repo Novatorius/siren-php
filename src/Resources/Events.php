@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace Siren\Sdk\Resources;
 
+use Siren\Sdk\Auth\AppTokens;
+use Siren\Sdk\BrowserToken;
+use Siren\Sdk\BrowserTokenEndpoint;
+use Siren\Sdk\BrowserTokenHandler;
 use Siren\Sdk\EventResult;
+use Siren\Sdk\Exception\SirenException;
 use Siren\Sdk\HttpTransport;
 
 /**
@@ -20,11 +25,19 @@ use Siren\Sdk\HttpTransport;
  * integrations forward and `site-visited`. While the organization's engine
  * is paused, Siren queues the event and answers 202, which
  * {@see EventResult::isQueued()} reports. Do not send a queued event again.
+ *
+ * A custom event takes only a short-lived app token, which {@see ingest()}
+ * gets from the app's key and keeps fresh on its own. For a page that sends
+ * a custom event from the browser, see {@see browserToken()}.
  */
 final class Events
 {
+    /**
+     * @param AppTokens|null $appTokens Null for a client built with an access token, which sends with that token.
+     */
     public function __construct(
         private readonly HttpTransport $transport,
+        private readonly ?AppTokens $appTokens = null,
     ) {
     }
 
@@ -97,9 +110,16 @@ final class Events
     }
 
     /**
-     * Ingests a custom event type registered on the organization.
+     * Sends a custom event of the app.
      *
      * The payload is passed through as the JSON body unchanged.
+     *
+     * The send carries a short-lived app token, not the key. The client gets
+     * one from the key the first time, keeps it, and gets a new one when
+     * fewer than two minutes of its life are left. A send Siren answers with
+     * 401 drops the token and goes again once with a new one. A key that
+     * belongs to no app sends with the key, and a client built with
+     * `accessToken` sends with that token.
      *
      * @param array<string, mixed> $payload
      */
@@ -109,15 +129,108 @@ final class Events
             throw new \InvalidArgumentException('events->ingest() requires a non-empty event slug.');
         }
 
-        return $this->send($slug, $payload);
+        $token = $this->appTokens?->serverToken();
+
+        if ($token === null) {
+            return $this->send($slug, $payload);
+        }
+
+        try {
+            return $this->send($slug, $payload, $token);
+        } catch (SirenException $e) {
+            if ($e->getStatusCode() !== 401 || $this->appTokens === null) {
+                throw $e;
+            }
+
+            $this->appTokens->dropServerToken($token);
+            $fresh = $this->appTokens->serverToken();
+
+            if ($fresh === null) {
+                throw $e;
+            }
+
+            return $this->send($slug, $payload, $fresh);
+        }
+    }
+
+    /**
+     * A browser token for one custom event of the app, for a page to send
+     * that event with. Call it on the app's server, never in the page.
+     *
+     * The token lasts ten minutes and works only for this event, from a
+     * domain the event allows. The client reuses it until fewer than 60
+     * seconds are left, so a busy page costs one grant every nine minutes
+     * or so.
+     *
+     * @throws \LogicException When the client was built with an access token, which can't get one.
+     * @throws SirenException   When Siren refuses: `invalid_scope` for an event the app lacks or
+     *                          one that allows no domain.
+     */
+    public function browserToken(string $eventKey): BrowserToken
+    {
+        if ($eventKey === '') {
+            throw new \InvalidArgumentException('events->browserToken() requires a non-empty event key.');
+        }
+
+        if ($this->appTokens === null) {
+            throw new \LogicException('events->browserToken() needs a client built with the app\'s key ("apiKey").');
+        }
+
+        return $this->appTokens->browserToken($eventKey);
+    }
+
+    /**
+     * The browser token address as a PSR-15 handler, mounted in one line:
+     *
+     * ```php
+     * $app->map(['GET', 'POST'], '/siren/token', $siren->events->browserTokenHandler(['events' => ['demo-booked']]));
+     * ```
+     *
+     * It reads the event key from a JSON body `{"event": "..."}` or the
+     * query `?event=`, and answers 200 `{token, expiresIn, url}`, 400
+     * `{error}` for a missing or refused event, or 502 when Siren can't be
+     * reached. See {@see BrowserTokenEndpoint}.
+     *
+     * @param array{
+     *     events?: list<string>|null,
+     *     responseFactory?: \Psr\Http\Message\ResponseFactoryInterface,
+     *     streamFactory?: \Psr\Http\Message\StreamFactoryInterface,
+     * } $options `events`: the only event keys a page may ask for.
+     */
+    public function browserTokenHandler(array $options = []): BrowserTokenHandler
+    {
+        return new BrowserTokenHandler(
+            new BrowserTokenEndpoint($this, $options),
+            $options['responseFactory'] ?? null,
+            $options['streamFactory'] ?? null,
+        );
+    }
+
+    /**
+     * Answers the current request as the browser token address, for a site
+     * with no framework. Put it in a file of its own, such as
+     * `siren-token.php`:
+     *
+     * ```php
+     * $siren->events->serveBrowserToken(['events' => ['demo-booked']]);
+     * ```
+     *
+     * It reads the request body and `$_GET`, sets the status and headers and
+     * echoes the JSON, answering as {@see browserTokenHandler()} does.
+     *
+     * @param array{events?: list<string>|null} $options
+     */
+    public function serveBrowserToken(array $options = []): void
+    {
+        (new BrowserTokenEndpoint($this, $options))->serve();
     }
 
     /**
      * @param array<string, mixed> $payload
      */
-    private function send(string $slug, array $payload): EventResult
+    private function send(string $slug, array $payload, ?string $token = null): EventResult
     {
-        $response = $this->transport->request('POST', '/event/' . rawurlencode($slug), $payload);
+        $response = $this->transport->request('POST', '/event/' . rawurlencode($slug), $payload, bearer: $token);
 
         $oid = $response->getHeaderLine('X-Siren-OID');
         $body = $response->json();
