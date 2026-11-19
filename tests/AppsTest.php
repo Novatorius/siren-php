@@ -147,6 +147,17 @@ final class AppsTest extends TestCase
         $this->apps()->verifyRequest($body, $headers, $secret, null, $t + 301);
     }
 
+    public function testASignedTimeAheadOfTheClockByMoreThanTheToleranceIsRefused(): void
+    {
+        [$body, $headers, $secret, $t] = self::signed();
+
+        $this->assertSame($t, $this->apps()->verifyRequest($body, $headers, $secret, null, $t - 300)->timestamp);
+
+        $this->expectException(SignatureVerificationException::class);
+        $this->expectExceptionMessage('more than 300 seconds');
+        $this->apps()->verifyRequest($body, $headers, $secret, null, $t - 301);
+    }
+
     public function testTheArgumentsAreCheckedFirst(): void
     {
         [$body, $headers, , $t] = self::signed();
