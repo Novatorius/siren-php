@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `$siren->apps->verifyRequest($rawBody, $headers, $secret, $toleranceSeconds,
+  $now)` checks a request Siren signed and sent an app and returns an
+  `AppRequest`. It checks `X-Siren-Event`, the `X-Siren-Signature-V2`
+  signature over `"{t}."` and the raw body, `X-Siren-Timestamp`, a replay
+  window of 300 seconds by default (at most 3600), and the version 1
+  envelope, and throws `SignatureVerificationException` with the reason. It
+  reads nothing over the network.
+- `$siren->apps->requests->answer($id, $answer)` sends an ask's answer once
+  with `POST /apps/requests/{id}/answer` and returns an `AppAnswerReceipt`.
+  It throws `InvalidArgumentException` before sending for a bad id, a list,
+  an answer with no text `outcome`, and one over 16384 bytes of JSON, and
+  gives Siren's uncoded 401 the code `ErrorCode::APP_ANSWER_UNAUTHORIZED`.
 - `payouts->retrieve($id, $params)` reads one payout with `GET /payouts/{id}`.
   It takes `fields` and `include` (`extended` adds the collaborator's name and
   email), and an API key that holds `ledger:payouts:read`. `$siren->payouts`

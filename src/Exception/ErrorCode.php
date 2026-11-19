@@ -132,6 +132,14 @@ final class ErrorCode
     public const HOLD_LIMIT = 'hold_limit';
 
     /**
+     * 401: Siren takes no answer to an app's request from this key. An app
+     * answers with its own key. The SDK also gives this code to the uncoded
+     * 401 Siren's key check sends on the answer route. An
+     * {@see AuthenticationException}.
+     */
+    public const APP_ANSWER_UNAUTHORIZED = 'app_answer_unauthorized';
+
+    /**
      * The 403 codes that mean Siren's policy refused the request, so
      * repeating it fails again. Each is a {@see PolicyException}.
      *

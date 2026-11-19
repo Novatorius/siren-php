@@ -28,6 +28,7 @@ use Siren\Sdk\Resources\ProgramGroups;
 use Siren\Sdk\Resources\Programs;
 use Siren\Sdk\Resources\Settings;
 use Siren\Sdk\Resources\Transactions;
+use Siren\Sdk\Resources\Apps;
 use Siren\Sdk\Resources\Webhooks;
 
 /**
@@ -75,6 +76,9 @@ class Siren
 
     /** Verify inbound webhook signatures and manage subscriptions. */
     public readonly Webhooks $webhooks;
+
+    /** An app's side of Siren's exchange: `verifyRequest`, and `requests->answer`. */
+    public readonly Apps $apps;
 
     /** Manage API keys: `create`, `list`, `revoke`. Takes a signed-in dashboard session. */
     public readonly ApiKeys $apiKeys;
@@ -176,6 +180,7 @@ class Siren
 
         $this->events = new Events($transport, self::resolveAppTokens($config, $transport));
         $this->webhooks = new Webhooks($transport);
+        $this->apps = new Apps($transport);
         $this->apiKeys = new ApiKeys($transport);
         $this->conversions = new Conversions($transport);
         $this->transactions = new Transactions($transport);

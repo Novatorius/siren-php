@@ -317,6 +317,45 @@ credit unless you check it on your server.
 
 The [examples](examples) folder holds each of these as a file.
 
+### Answer Siren's request to your app
+
+An app's feature, such as a payout method or a distribution resolver, gets
+requests from Siren at the app's address. Siren signs each one with the app's
+signing secret. Check it with `apps->verifyRequest()`, then answer an ask with
+`apps->requests->answer()`, using a client made with the app's own key.
+
+```php
+$siren = new Siren\Sdk\Siren(['apiKey' => getenv('SIREN_API_KEY')]);
+
+$request = $siren->apps->verifyRequest(
+    file_get_contents('php://input'),
+    getallheaders(),
+    getenv('SIREN_SIGNING_SECRET'),
+);
+
+if ($request->isAsk()) {
+    $receipt = $siren->apps->requests->answer($request->id, ['outcome' => 'paid', 'reference' => 'TX-1']);
+}
+```
+
+`verifyRequest()` reads nothing over the network. It checks, in this order,
+that `X-Siren-Event` is `app.request` when present, that
+`X-Siren-Signature-V2` (`t=<seconds>,v1=<hex>`) signs `"{t}."` and the raw
+body, that `X-Siren-Timestamp` matches `t`, that `t` is within
+`$toleranceSeconds` of the clock (300 by default, at most 3600), and that the
+body is an app request of version 1. Each failure throws
+`SignatureVerificationException` with the reason. Pass the body exactly as
+received. Siren may send one request more than once, so drop a repeat by
+`$request->id`.
+
+`answer()` sends `POST /apps/requests/{id}/answer` once and never retries it.
+It throws `InvalidArgumentException` before sending for an id that is not a
+request key, an answer that is a list, one with no text `outcome`, and one
+over 16384 bytes as JSON. A different second answer throws
+`ConflictException` with code `app_request_already_answered`, and the first
+answer stands. When Siren takes no answer from the key,
+`AuthenticationException` carries `ErrorCode::APP_ANSWER_UNAUTHORIZED`.
+
 ### Which credential does each call need?
 
 | Calls | Credential |
@@ -325,6 +364,8 @@ The [examples](examples) folder holds each of these as a file.
 | `conversions`, `transactions`, `obligations` and `payouts`: `list()`, and `retrieve()` where the SDK has it | An API key holding the matching ledger scope, such as `ledger:conversions:read`. A dashboard session's access token, or a connected site's token, also works. |
 | `fulfillments`: `list()` and `retrieve()` | An API key holding `ledger:fulfillments:read` (`ApiKeyRecordScope::FULFILLMENTS_READ`). A dashboard session's access token also works. |
 | `webhooks->subscriptions` | An API key holding `webhook-subscriptions:read` for `list()`, `events()`, `retrieve()` and `deliveries()`, or `webhook-subscriptions:manage` for every call. A dashboard session's access token also works. |
+| `apps->verifyRequest()` | None. It reads nothing over the network, and checks the request with the app's signing secret. |
+| `apps->requests->answer()` | The app's own API key. Owning the feature is what lets the key answer, so it needs no scope. |
 | `apiKeys` | A signed-in dashboard session's access token. No API key scope reaches them. |
 | Other record resources, and the writes on `conversions` and `transactions` | A dashboard session's access token, or a connected site's token on the routes Siren Cloud opens to connectors. See [Connected sites](#connected-sites). |
 
@@ -794,6 +835,8 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `events->ingest($slug, $payload)` | `siren.events.ingest(slug, payload)` | `POST /oauth/token`, then `POST /event/{slug}` | the app's key, traded for a token |
 | `events->browserToken($eventKey)` | `siren.events.browserToken(eventKey)` | `POST /oauth/token` with `scope=browser:{eventKey}` | the app's key |
 | `events->browserTokenHandler($options)`, `events->serveBrowserToken($options)` | `siren.events.browserTokenHandler(options)` | `POST /oauth/token` | the app's key |
+| `apps->verifyRequest($rawBody, $headers, $secret, $toleranceSeconds, $now)` | `siren.apps.verifyRequest(rawBody, headers, secret, options)` | none | none |
+| `apps->requests->answer($id, $answer)` | `siren.apps.requests.answer(id, answer)` | `POST /apps/requests/{id}/answer` | the app's key |
 
 Every route above but the token route takes an organization-wide key only.
 Node's handler takes Node's `(req, res)` or a Web `Request`. PHP's comes as a
