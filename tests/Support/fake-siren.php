@@ -57,9 +57,20 @@ if ($path === '/siren/v1/oauth/token') {
 }
 
 if (preg_match('#^/siren/v1/event/([^/]+)$#', $path, $matches) === 1) {
-    if ($authorization !== 'Bearer srv.fake-token') {
+    // A server send carries the server token as a bearer, and a browser send
+    // carries the browser token as ?access_token=.
+    if ($authorization !== 'Bearer srv.fake-token' && ($_GET['access_token'] ?? null) !== 'brw.fake-token') {
         http_response_code(401);
         echo json_encode(['error' => 'This access token has expired.']);
+
+        return true;
+    }
+
+    // Siren reads the collaborator who gets credit from the top of the body
+    // (CustomEventIngestion::ingest()).
+    if (!isset($body['collaboratorId'])) {
+        http_response_code(400);
+        echo json_encode(['error' => ['message' => 'collaboratorId is required', 'context' => ['type' => 'VALIDATION_FAILED']]]);
 
         return true;
     }

@@ -278,8 +278,10 @@ returns the same status and body for you to send. `$siren->events->browserToken(
 gives the `BrowserToken` itself.
 
 The page asks for the token, then posts the event's data to `url` with the
-token in the query:
+token in the query. Siren needs `collaboratorId`, the collaborator who gets
+credit, at the top of the body:
 
+<!-- readme-test: page -->
 ```html
 <script>
 async function sirenTrack(event, data) {
@@ -298,7 +300,7 @@ async function sirenTrack(event, data) {
   return sent.ok ? sent.json() : null;
 }
 
-sirenTrack('signup-completed', { plan: 'pro' });
+sirenTrack('signup-completed', { collaboratorId: 12, plan: 'pro' });
 </script>
 ```
 

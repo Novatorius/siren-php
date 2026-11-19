@@ -78,6 +78,29 @@ final class ReadmeExamplesTest extends TestCase
                 $file,
             );
         }
+
+        $this->assertSame(self::snippet('page', 'html'), file_get_contents(dirname(__DIR__) . '/examples/page.html'));
+    }
+
+    public function testThePageSnippetSendsABodySirenAccepts(): void
+    {
+        $page = self::snippet('page', 'html');
+        $this->assertSame(1, preg_match("/sirenTrack\\('([\\w-]+)', (\\{.*?\\})\\);/", $page, $call), 'The page snippet calls sirenTrack().');
+        // The page's object literal, as JSON: quote the keys and the strings.
+        $json = (string) preg_replace(["/([{,]\\s*)(\\w+):/", "/'([^']*)'/"], ['$1"$2":', '"$1"'], $call[2]);
+        $data = json_decode($json, true);
+        $this->assertIsArray($data, $call[2]);
+
+        $siren = new \Siren\Sdk\Siren(['apiKey' => self::APP_KEY, 'baseUrl' => self::$sirenUrl, 'tokenCache' => false]);
+        $token = $siren->events->browserToken($call[1]);
+        $send = $token->url . '?access_token=' . rawurlencode($token->token);
+
+        [$status, , $body] = self::fetch($send, 'POST', json_encode($data, JSON_THROW_ON_ERROR));
+        $this->assertSame([200, 'recorded'], [$status, $body['status'] ?? null], 'Siren takes the body the README page sends.');
+
+        unset($data['collaboratorId']);
+        [$status] = self::fetch($send, 'POST', json_encode($data, JSON_THROW_ON_ERROR));
+        $this->assertSame(400, $status, 'The fake refuses a body with no collaboratorId, as Siren does.');
     }
 
     public function testTheServerSendSnippetTradesTheKeyAndSendsWithTheToken(): void
@@ -163,10 +186,10 @@ final class ReadmeExamplesTest extends TestCase
         $this->assertSame(400, $refused->getStatusCode());
     }
 
-    private static function snippet(string $name): string
+    private static function snippet(string $name, string $language = 'php'): string
     {
         $readme = (string) file_get_contents(dirname(__DIR__) . '/README.md');
-        $found = preg_match('/<!-- readme-test: ' . preg_quote($name, '/') . ' -->\n```php\n(.*?)```/s', $readme, $matches);
+        $found = preg_match('/<!-- readme-test: ' . preg_quote($name, '/') . ' -->\n```' . $language . '\n(.*?)```/s', $readme, $matches);
         self::assertSame(1, $found, 'README has no snippet named ' . $name);
 
         return $matches[1];
