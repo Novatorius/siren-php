@@ -67,32 +67,63 @@ final class AppRequests
      */
     public function answer(string $id, array $answer): AppAnswerReceipt
     {
+        return $this->send($id, $answer, false, 'apps->requests->answer()');
+    }
+
+    /**
+     * Answers an ask as {@see answer()} does, with the same checks, but sends
+     * it again after a lost connection, a 429 or a 5xx, inside the client's
+     * `maxRetries`. The resend is safe because it carries the very same
+     * answer, which Siren takes again as a duplicate. Only
+     * {@see \Siren\Sdk\AppRequestHandler} calls it, after the function it
+     * runs returns an answer.
+     *
+     * @internal
+     *
+     * @param array<int|string, mixed> $answer
+     *
+     * @throws \InvalidArgumentException When the id or the answer can't be sent.
+     * @throws SirenException When Siren refuses the answer, or the last try fails.
+     */
+    public function answerRetried(string $id, array $answer): AppAnswerReceipt
+    {
+        return $this->send($id, $answer, true, 'The request handler');
+    }
+
+    /**
+     * @param array<int|string, mixed> $answer
+     */
+    private function send(string $id, array $answer, bool $retryable, string $caller): AppAnswerReceipt
+    {
         if (preg_match(self::REQUEST_ID_PATTERN, $id) !== 1) {
             throw new \InvalidArgumentException(sprintf(
-                'apps->requests->answer() needs a request id of apr_ and 32 lowercase hex characters, and got %s.',
+                '%s needs a request id of apr_ and 32 lowercase hex characters, and got %s.',
+                $caller,
                 json_encode($id),
             ));
         }
 
         if ($answer === [] || array_is_list($answer)) {
-            throw new \InvalidArgumentException(
-                "apps->requests->answer() takes the answer as an object, such as ['outcome' => 'paid', 'reference' => 'TX-1'].",
-            );
+            throw new \InvalidArgumentException(sprintf(
+                "%s takes the answer as an object, such as ['outcome' => 'paid', 'reference' => 'TX-1'].",
+                $caller,
+            ));
         }
 
         if (!is_string($answer['outcome'] ?? null) || $answer['outcome'] === '') {
-            throw new \InvalidArgumentException("apps->requests->answer() needs a text outcome in the answer, such as 'paid' or 'resolved'.");
+            throw new \InvalidArgumentException(sprintf("%s needs a text outcome in the answer, such as 'paid' or 'resolved'.", $caller));
         }
 
         try {
             $json = json_encode($answer, JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
-            throw new \InvalidArgumentException('apps->requests->answer() could not write the answer as JSON.', 0, $e);
+            throw new \InvalidArgumentException(sprintf('%s could not write the answer as JSON.', $caller), 0, $e);
         }
 
         if (strlen($json) > self::MAX_ANSWER_BYTES) {
             throw new \InvalidArgumentException(sprintf(
-                'apps->requests->answer() takes an answer of at most %d bytes as JSON, which Siren also refuses past.',
+                '%s takes an answer of at most %d bytes as JSON, which Siren also refuses past.',
+                $caller,
                 self::MAX_ANSWER_BYTES,
             ));
         }
@@ -100,7 +131,7 @@ final class AppRequests
         $path = '/apps/requests/' . $id . '/answer';
 
         try {
-            $response = $this->transport->request('POST', $path, $answer, [], false);
+            $response = $this->transport->request('POST', $path, $answer, [], $retryable);
         } catch (AuthenticationException $e) {
             if ($e->getStatusCode() === 401 && ($e->getErrorCode() === null || $e->getErrorCode() === '')) {
                 throw new AuthenticationException(self::UNAUTHORIZED_ANSWER, 401, ErrorCode::APP_ANSWER_UNAUTHORIZED, $e->getErrorData(), $e);

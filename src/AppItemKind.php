@@ -23,7 +23,7 @@ final class AppItemKind
     /** An ask to divide each pool, picked on a distributor. */
     public const DISTRIBUTION_RESOLVER = 'distributionResolver';
 
-    /** An event of the app's own, which the app sends Siren. Siren sends it nothing. */
+        /** An event of the app's own, which the app sends Siren. Siren sends it nothing. */
     public const CUSTOM_EVENT = 'customEvent';
 
     /**
@@ -48,8 +48,8 @@ final class AppItemKind
      * picked on a program. The app answers
      * `['outcome' => 'rewards', 'units' => 'USD', 'rewards' => ['1042' => 900, '1043' => null]]`,
      * with the pool's units and every conversion id of the question, each a
-     * whole number of 0 or more or null. The rewards wait for the answer, 24
-     * hours from the first ask at most.
+     * whole number of 0 or more and no more than the pool, or null. The
+     * rewards wait for the answer, 24 hours from the first ask at most.
      */
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
 
