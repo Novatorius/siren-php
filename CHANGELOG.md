@@ -31,8 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole steps of the pool's currency, rounded down so the sum never passes
   `pool.value`, and evenly when every weight is 0. It throws
   `InvalidArgumentException` for a negative, non-finite or non-number weight.
-- `AppFeatureKind` names the five kinds Siren sends requests for and holds
-  each kind's question and answer as PHPStan types.
+- `AppFeatureKind` names the seven kinds Siren sends requests for, with the
+  same values as `AppItemKind`, and holds each kind's question and answer as
+  PHPStan types. `AppItemKind::INCENTIVE_RESOLVER` (`incentiveResolver`)
+  names the incentive resolver of slice C16-2.
+- `AppItemKind` names the kinds of feature an app can add, as an app
+  request's `item['kind']` carries them, among them the new
+  `METRIC_CALCULATION` (`metricCalculation`) and `METRIC_FILTER`
+  (`metricFilter`). The README shows the answer each of the two takes.
 - `$siren->apps->verifyRequest($rawBody, $headers, $secret, $toleranceSeconds,
   $now)` checks a request Siren signed and sent an app and returns an
   `AppRequest`. It checks `X-Siren-Event`, the `X-Siren-Signature-V2`

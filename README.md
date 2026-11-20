@@ -387,9 +387,10 @@ every weight is 0, it splits the pool evenly. It throws
 `InvalidArgumentException` for a negative or non-finite weight, a weight that
 is not a number, and a pool with no whole `value` or no currency.
 
-`AppFeatureKind` names the kinds as constants, and holds the shape of each
-kind's question and answer as PHPStan types, such as
-`AppDistributionQuestion` and `AppRewardAnswer`, for
+`AppFeatureKind` names the kinds Siren sends requests for, with the same
+names and values as `AppItemKind`, and sorts them into `TELLS` and `ASKS`. It
+holds the shape of each kind's question and answer as PHPStan types, such as
+`AppDistributionQuestion`, `AppRewardAnswer` and `AppMetricFilterAnswer`, for
 `@phpstan-import-type`.
 
 #### What the handler replies
@@ -525,6 +526,35 @@ over 16384 bytes as JSON. A different second answer throws
 `ConflictException` with code `app_request_already_answered`, and the first
 answer stands. When Siren takes no answer from the key,
 `AuthenticationException` carries `ErrorCode::APP_ANSWER_UNAUTHORIZED`.
+
+`AppItemKind` names each kind as `$request->item['kind']` carries it. The SDK
+checks only what every answer needs, so Siren checks the rest of each kind's
+answer and refuses one that doesn't fit with 422. A metric calculation
+(`AppItemKind::METRIC_CALCULATION`) scores a metric for a distributor and
+answers a score for each collaborator. Siren takes at most 50 results, each
+collaborator once and each in the organization and not in the trash, and each
+score a whole number of 0 or more. An empty list scores nobody. A metric
+filter (`AppItemKind::METRIC_FILTER`) answers whether one collaborator's
+metric counts: allow it, or suppress it with a plain text reason of 1 to 200
+characters.
+
+```php
+use Siren\Sdk\AppItemKind;
+
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::METRIC_CALCULATION) {
+    $siren->apps->requests->answer($request->id, [
+        'outcome' => 'scores',
+        'results' => [['collaboratorId' => 7, 'score' => 10]],
+    ]);
+}
+
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::METRIC_FILTER) {
+    $collaboratorId = $request->data['collaborator']['id'];
+    $siren->apps->requests->answer($request->id, ownsCustomer($collaboratorId)
+        ? ['outcome' => 'suppress', 'reason' => 'Customer already owned by a partner']
+        : ['outcome' => 'allow']);
+}
+```
 
 ### Which credential does each call need?
 
