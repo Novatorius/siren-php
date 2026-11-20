@@ -317,12 +317,165 @@ credit unless you check it on your server.
 
 The [examples](examples) folder holds each of these as a file.
 
-### Answer Siren's request to your app
+### Answer Siren in a few lines
 
-An app's feature, such as a payout method or a distribution resolver, gets
-requests from Siren at the app's address. Siren signs each one with the app's
-signing secret. Check it with `apps->verifyRequest()`, then answer an ask with
-`apps->requests->answer()`, using a client made with the app's own key.
+An app's features get requests from Siren at the app's address. Register a
+function for each feature and the handler does the rest: it checks Siren's
+signature, finds the function by the feature's kind and key, replies, and
+posts an ask's answer once the reply has gone. Make the client with the app's
+own key, since the handler posts answers with it.
+
+An action after a conversion, a tell:
+
+<!-- readme-test: answer-tell -->
+```php
+<?php
+use Siren\Sdk\Siren;
+
+$siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
+
+$siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
+    ->on('postConversionAction', 'tell-the-crm', function ($request) {
+        // Siren may send it twice, so add it once, keyed by $request->id.
+        addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
+    })
+    ->serve();
+```
+
+For another feature, only the function changes. An action after an
+allocation, also a tell:
+
+<!-- readme-test: answer-allocation -->
+```php
+    ->on('postAllocationAction', 'note-the-share', function ($request) {
+        // Siren may send it twice, so note it once, keyed by $request->id.
+        noteShare($request->id, $request->data['allocation']);
+    })
+```
+
+A distribution resolver, an ask. The function returns the answer, and the
+handler posts it:
+
+<!-- readme-test: answer-distribution -->
+```php
+    ->on('distributionResolver', 'split-by-score', fn ($request) => [
+        'outcome' => 'allocated',
+        'units' => $request->data['pool']['units'],
+        // Whole currency steps, never more than the pool, split evenly when every score is 0.
+        'shares' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['metrics'], 'score', 'metricId')),
+    ])
+```
+
+An incentive resolver, also an ask:
+
+<!-- readme-test: answer-incentive -->
+```php
+    ->on('incentiveResolver', 'split-the-reward', fn ($request) => [
+        'outcome' => 'rewards',
+        'units' => $request->data['pool']['units'],
+        'rewards' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['conversions'], 'score', 'conversionId')),
+    ])
+```
+
+`apps->splitPool($pool, $weights)` takes the question's `pool` and a weight
+by id, which `array_column($rows, 'score', 'metricId')` gives in one call. It
+answers an amount by id, each a whole number of the currency's step
+(`10 ** (scale - decimalPlaces)` in the stored unit, so 100 for yen at scale
+2), rounded down so the amounts never add up to more than `pool.value`. When
+every weight is 0, it splits the pool evenly. It throws
+`InvalidArgumentException` for a negative or non-finite weight, a weight that
+is not a number, and a pool with no whole `value` or no currency.
+
+`AppFeatureKind` names the kinds as constants, and holds the shape of each
+kind's question and answer as PHPStan types, such as
+`AppDistributionQuestion` and `AppRewardAnswer`, for
+`@phpstan-import-type`.
+
+#### What the handler replies
+
+| Request | Reply |
+|---------|-------|
+| Not a POST | 405 `{"error"}` |
+| A body a parser already read, so there are no bytes to check | 500 `{"error"}` that says to mount the handler before the JSON parser, or give the route a raw body. `onError` hears it too. |
+| `X-Siren-Signature-V2` missing or wrong, `X-Siren-Timestamp` different from the signed time, or a time more than `toleranceSeconds` from the clock | 401 `{"error"}` with `verifyRequest()`'s words |
+| A signed body that is not JSON, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
+| A tell with a function | 200 `{}` once the function returns, or 500 when it throws, so Siren tries again about 1, 2, 4 and 8 minutes later |
+| An ask with a function | 200 `{}` at once, then the function runs and the answer it returns is posted |
+| An `app.request` for a feature with no function | 404 `{"error": "No function handles distributionResolver split-by-score."}`, so Siren tries again and then shows the request under Needs attention |
+| Another `X-Siren-Event` with a function from `onEvent()` | 200 `{}` once it returns, or 500 when it throws |
+| Another `X-Siren-Event` with no function | 200 `{}` |
+
+Every reply is JSON with `Cache-Control: no-store`, and no reply holds the
+secret or the body.
+
+An ask's function returns the answer as an array, or `null` when the app will
+answer later with `apps->requests->answer()`. The handler checks the answer
+as `requests->answer()` does and posts it to `POST /apps/requests/{id}/answer`
+with the client's key. Unlike `requests->answer()`, it sends the answer again
+after a lost connection, a 429 or a 5xx, inside the client's `maxRetries`,
+since it sends the very same answer and Siren takes that again as a
+duplicate. A refusal, such as 422 `app_answer_invalid` or 409
+`app_request_already_answered`, goes to `onError` and is not sent again. When
+the function throws or no answer lands, Siren asks again after `answerBy`,
+three sends in all.
+
+`on($kind, $key, $fn)` registers one feature, and `on($kind, $fn)` every
+feature of a kind. A function for the key wins. `onEvent($type, $fn)` takes a
+webhook event Siren sends to the same address, such as
+`conversion.approved`, as a `WebhookEvent`.
+
+#### Options
+
+```php
+$answers = $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'), [
+    'toleranceSeconds' => 300,                          // as verifyRequest(), 1 to 3600
+    'runLater' => fn ($work) => app()->terminating($work), // where an ask's work runs after the reply
+    'onError' => fn (\Throwable $error, ?object $about) => report($error), // default error_log()
+]);
+```
+
+`onError` gets each failure the reply can't carry, with the `AppRequest` or
+`WebhookEvent` it came from: a function that threw, an answer that could not
+be sent, and Siren's refusal of one.
+
+#### Mount it
+
+`serve()` answers the current plain PHP request from `php://input`. For an
+ask, it sends the reply, ends the response with `fastcgi_finish_request()` or
+`litespeed_finish_request()`, or with `Content-Length`, `Connection: close`
+and a flush on other servers, and then runs the function.
+
+`psr15()` gives a PSR-15 request handler for Slim, Mezzio and any framework
+that routes to one. It needs `psr/http-server-handler`, and runs an ask's
+work from a shutdown function once the framework has sent the response.
+
+```php
+$app->post('/siren', $answers->psr15());
+```
+
+`answer($method, $rawBody, $headers)` answers one request in any other
+framework, and returns an `AppRequestReply` with `status`, `headers`, `body`
+and `after`. Send the reply, then run `after` when it is not null. With the
+`runLater` option, the work goes to `runLater` and `after` is null.
+
+```php
+Route::post('/siren', function (Illuminate\Http\Request $request) use ($answers) {
+    $reply = $answers->answer($request->method(), $request->getContent(), $request->headers->all());
+
+    if ($reply->after !== null) {
+        app()->terminating($reply->after);
+    }
+
+    return response($reply->body, $reply->status, $reply->headers);
+});
+```
+
+### Check and answer by hand
+
+`apps->verifyRequest()` and `apps->requests->answer()` are the calls under
+the handler, for an app that queues the work or answers after a person
+decides. Check a request with `verifyRequest()`, then answer an ask with
+`requests->answer()`, using a client made with the app's own key.
 
 ```php
 $siren = new Siren\Sdk\Siren(['apiKey' => getenv('SIREN_API_KEY')]);
@@ -446,6 +599,7 @@ $page = $siren->conversions->list(['propertyId' => 5, 'status' => ConversionStat
 ## Features
 
 - **Event ingestion** — `sale`, `refund`, `siteVisited`, and custom event types via `ingest`, with what Siren recorded (`EventStatus`) and whether it queued the event.
+- **App requests** — `apps->requestHandler()` checks each request Siren sends an app, runs the function registered for the feature, replies, and posts an ask's answer, with `serve()`, `psr15()` or `answer()` to mount it, and `apps->splitPool()` splits a resolver's pool in whole currency steps.
 - **App tokens** — `ingest` trades the app's key for a short-lived token and keeps it fresh, and `browserTokenHandler()` or `serveBrowserToken()` gives a page a browser token for one event.
 - **Webhook verification** — one-call `constructEventFromHeaders` or `constructEvent`, plus a lower-level constant-time `verifySignature` boolean check.
 - **Subscription management** — create, list, read, update, test, and delete webhook subscriptions, and read the event catalog and each subscription's deliveries, with an API key or a dashboard session.
@@ -837,6 +991,8 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `events->browserTokenHandler($options)`, `events->serveBrowserToken($options)` | `siren.events.browserTokenHandler(options)` | `POST /oauth/token` | the app's key |
 | `apps->verifyRequest($rawBody, $headers, $secret, $toleranceSeconds, $now)` | `siren.apps.verifyRequest(rawBody, headers, secret, options)` | none | none |
 | `apps->requests->answer($id, $answer)` | `siren.apps.requests.answer(id, answer)` | `POST /apps/requests/{id}/answer` | the app's key |
+| `apps->requestHandler($signingSecret, $options)`, with `on`, `onEvent`, `serve`, `psr15` and `answer` | `siren.apps.requestHandler(options)`, with `on`, `onEvent`, `handle` and its Node, Web and Fastify mounts | `POST /apps/requests/{id}/answer` for an ask's answer | the app's key |
+| `Apps::splitPool($pool, $weights)` | `siren.apps.splitPool(pool, weights)` | none | none |
 
 Every route above but the token route takes an organization-wide key only.
 Node's handler takes Node's `(req, res)` or a Web `Request`. PHP's comes as a

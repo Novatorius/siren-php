@@ -1,9 +1,12 @@
 <?php
 
-// Router for PHP's built-in web server, used by ReadmeExamplesTest. It plays
-// Siren's token route and a custom event's send address on 127.0.0.1, the way
-// docs/architecture/apps-event-tokens.md (sections 1 and 2) describes them,
-// and writes each request it gets to the file FAKE_SIREN_LOG names.
+// Router for PHP's built-in web server, used by ReadmeExamplesTest and
+// AppRequestSamplesTest. It plays Siren's token route and a custom event's
+// send address on 127.0.0.1, the way docs/architecture/apps-event-tokens.md
+// (sections 1 and 2) describes them, and the answer route an app posts an
+// ask's answer to. It writes each request it gets to the file FAKE_SIREN_LOG
+// names. FAKE_SIREN_ANSWER_DELAY_MS holds an answer that long before
+// writing it down, so a test can tell an app replied before it answered.
 
 declare(strict_types=1);
 
@@ -14,6 +17,13 @@ $raw = (string) file_get_contents('php://input');
 $body = json_decode($raw, true);
 $body = is_array($body) ? $body : [];
 $authorization = (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? '');
+
+$answerRoute = preg_match('#^/siren/v1/apps/requests/(apr_[0-9a-f]{32})/answer$#', $path) === 1;
+$delay = (int) getenv('FAKE_SIREN_ANSWER_DELAY_MS');
+
+if ($answerRoute && $delay > 0) {
+    usleep($delay * 1000);
+}
 
 $log = getenv('FAKE_SIREN_LOG');
 
@@ -77,6 +87,20 @@ if (preg_match('#^/siren/v1/event/([^/]+)$#', $path, $matches) === 1) {
 
     header('X-Siren-OID: 9001');
     echo json_encode(['status' => 'recorded', 'event' => rawurldecode($matches[1])]);
+
+    return true;
+}
+
+if ($answerRoute && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    // The answer route takes the app's own key (AnswerAppRequest, AppAnswerResult).
+    if ($authorization !== 'Bearer ' . APP_KEY) {
+        http_response_code(401);
+        echo json_encode(['error' => ['message' => 'Siren takes no answer from this key.', 'code' => 'app_answer_unauthorized', 'context' => []]]);
+
+        return true;
+    }
+
+    echo json_encode(['status' => 'accepted']);
 
     return true;
 }

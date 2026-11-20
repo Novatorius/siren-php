@@ -5,15 +5,19 @@ declare(strict_types=1);
 namespace Siren\Sdk\Resources;
 
 use Siren\Sdk\AppRequest;
+use Siren\Sdk\AppRequestHandler;
 use Siren\Sdk\Exception\SignatureVerificationException;
 use Siren\Sdk\HttpTransport;
+use Siren\Sdk\WebhookEvent;
 
 /**
- * An app's side of Siren's exchange: checking a request Siren signed and
- * sent the app, and answering an ask through {@see $requests}.
+ * An app's side of Siren's exchange: {@see requestHandler()}, which checks,
+ * routes and answers each request Siren sends the app, and the low-level
+ * calls under it, {@see verifyRequest()} and `requests->answer()`, for an
+ * app that queues the work or answers after a person decides.
  *
- * Mirrors `siren.apps.verifyRequest()` and `siren.apps.requests.answer()`
- * in the Node SDK, and follows the same steps in the same order.
+ * Mirrors `siren.apps` in the Node SDK, and follows the same steps in the
+ * same order.
  */
 final class Apps
 {
@@ -100,6 +104,144 @@ final class Apps
             ));
         }
 
+        $t = self::signedTime($rawBody, $headers, $secret, $tolerance, (float) $now);
+
+        try {
+            $body = json_decode($rawBody, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new SignatureVerificationException('The signed body is not JSON.', 0, null, null, $e);
+        }
+
+        return self::requestFrom($body, $t, $headers);
+    }
+
+    /**
+     * Answers Siren's requests to the app in a few lines: it checks each
+     * request as {@see verifyRequest()} does, runs the function registered
+     * for the feature, replies, and posts an ask's answer after the reply.
+     *
+     * ```php
+     * $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
+     *     ->on('postConversionAction', 'tell-the-crm', function ($request) { ... })
+     *     ->serve();
+     * ```
+     *
+     * {@see AppRequestHandler} gives each reply. It posts an answer with
+     * this client's key, so make the client with the app's own key.
+     *
+     * @param string $signingSecret The app's signing secret, which Siren showed when it made the app.
+     * @param array{toleranceSeconds?: int, runLater?: callable(callable(): void): void, onError?: callable(\Throwable, AppRequest|WebhookEvent|null): void} $options
+     *     `toleranceSeconds`: as {@see verifyRequest()}, 1 to 3600, default 300.
+     *     `runLater`: takes an ask's work after the reply, such as
+     *     `fn ($work) => app()->terminating($work)` in Laravel.
+     *     `onError`: hears every failure the reply can't carry. Defaults to `error_log()`.
+     *
+     * @throws \InvalidArgumentException For an empty secret or an option it can't use.
+     */
+    public function requestHandler(string $signingSecret, array $options = []): AppRequestHandler
+    {
+        return new AppRequestHandler($this->requests, $signingSecret, $options);
+    }
+
+    /**
+     * Splits a pool by weight, for a distribution or incentive resolver's
+     * answer, such as the shares of `array_column($data['metrics'], 'score', 'metricId')`.
+     *
+     * Each amount is a whole number of the currency's step,
+     * `10 ** (scale - decimalPlaces)` in the stored unit, so 100 for yen at
+     * scale 2, and is rounded down, so the amounts never add up to more than
+     * `$pool['value']`. What rounding leaves stays unpaid, which Siren
+     * allows. When every weight is 0, every id gets an even share.
+     *
+     * @param array<string, mixed> $pool The question's `pool`: a whole `value` of 0 or more, and its `currency` with `scale` and `decimalPlaces`.
+     * @param array<int|string, int|float> $weights Weight by id, each a finite number of 0 or more.
+     * @return array<int|string, int> Amount by id, in the order of `$weights`.
+     *
+     * @throws \InvalidArgumentException For a pool it can't read, or a weight that is negative, not finite or not a number.
+     */
+    public static function splitPool(array $pool, array $weights): array
+    {
+        $value = $pool['value'] ?? null;
+
+        if (!is_int($value) || $value < 0) {
+            throw new \InvalidArgumentException('apps->splitPool() needs the pool value as a whole number of 0 or more, as Siren sends it.');
+        }
+
+        $currency = $pool['currency'] ?? null;
+        $scale = is_array($currency) ? ($currency['scale'] ?? null) : null;
+        $places = is_array($currency) ? ($currency['decimalPlaces'] ?? $scale) : null;
+
+        if (!is_int($scale) || !is_int($places) || $places < 0 || $places > $scale) {
+            throw new \InvalidArgumentException("apps->splitPool() needs the pool's currency, with whole scale and decimalPlaces and no more places than scale, as Siren sends it.");
+        }
+
+        $total = 0;
+        $whole = true;
+
+        foreach ($weights as $id => $weight) {
+            if ((!is_int($weight) && !is_float($weight)) || !is_finite((float) $weight) || $weight < 0) {
+                throw new \InvalidArgumentException(sprintf(
+                    'apps->splitPool() takes each weight as a finite number of 0 or more, and the weight for %s is not.',
+                    $id,
+                ));
+            }
+
+            $total += $weight;
+            $whole = $whole && is_int($weight);
+        }
+
+        if ($weights === []) {
+            return [];
+        }
+
+        if ($total <= 0) {
+            $weights = array_map(static fn(): int => 1, $weights);
+            $total = count($weights);
+            $whole = true;
+        }
+
+        $step = 10 ** ($scale - $places);
+        $steps = intdiv($value, $step);
+        $shares = [];
+
+        foreach ($weights as $id => $weight) {
+            $shares[$id] = self::stepsFor($steps, $weight, $total, $whole && is_int($total)) * $step;
+        }
+
+        return $shares;
+    }
+
+    /**
+     * The whole steps one weight earns of `$steps`, rounded down. Whole
+     * weights are worked out exactly while the product fits an integer.
+     */
+    private static function stepsFor(int $steps, int|float $weight, int|float $total, bool $whole): int
+    {
+        if ($whole && is_int($weight) && is_int($total) && ($weight === 0 || $steps <= intdiv(PHP_INT_MAX, $weight))) {
+            return intdiv($steps * $weight, $total);
+        }
+
+        $exact = $steps * ($weight / $total);
+        $down = (int) floor($exact);
+
+        // A product such as 90 * (0.7 / 0.9999999999999999) lands a hair under
+        // 63. Lifting a share that sits within 1e-9 of the next whole step
+        // never passes the pool: the parts add up to $steps, so the shares
+        // rounded down lose at least as much as the lifted ones gain.
+        return $exact - $down > 1 - 1e-9 ? $down + 1 : $down;
+    }
+
+    /**
+     * Steps 3 to 6 of {@see verifyRequest()}: the signature header, the
+     * timestamp header, the signature and the time. Answers the signed time.
+     *
+     * @internal Shared with {@see AppRequestHandler}.
+     *
+     * @param array<string, string|list<string>> $headers
+     * @throws SignatureVerificationException When the request fails a check, with the reason.
+     */
+    public static function signedTime(string $rawBody, array $headers, string $secret, int $tolerance, float $now): int
+    {
         $v2 = self::header($headers, 'X-Siren-Signature-V2');
 
         if ($v2 === null) {
@@ -128,19 +270,27 @@ final class Apps
             );
         }
 
-        if (abs((float) $now - $t) > $tolerance) {
+        if (abs($now - $t) > $tolerance) {
             throw new SignatureVerificationException(sprintf(
                 "The request's signed timestamp is more than %d seconds from this machine's clock, so it may be a replay. Check the clock if every request fails.",
                 $tolerance,
             ));
         }
 
-        try {
-            $body = json_decode($rawBody, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            throw new SignatureVerificationException('The signed body is not JSON.', 0, null, null, $e);
-        }
+        return $t;
+    }
 
+    /**
+     * Step 7 of {@see verifyRequest()}: the decoded body as an app request
+     * of version 1.
+     *
+     * @internal Shared with {@see AppRequestHandler}.
+     *
+     * @param array<string, string|list<string>> $headers
+     * @throws SignatureVerificationException When the body is not an app request of version 1.
+     */
+    public static function requestFrom(mixed $body, int $t, array $headers): AppRequest
+    {
         if (!self::isEnvelope($body)) {
             throw new SignatureVerificationException('The signed body is not an app request of version 1.');
         }
@@ -233,9 +383,13 @@ final class Apps
     }
 
     /**
+     * A header's first value, matched without regard to case.
+     *
+     * @internal Shared with {@see AppRequestHandler}.
+     *
      * @param array<string, string|list<string>> $headers
      */
-    private static function header(array $headers, string $name): ?string
+    public static function header(array $headers, string $name): ?string
     {
         foreach ($headers as $header => $value) {
             if (strcasecmp((string) $header, $name) !== 0) {
