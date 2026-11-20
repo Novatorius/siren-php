@@ -27,6 +27,7 @@ final class AppIncentiveResolverTest extends TestCase
             'customEvent',
             'distributionResolver',
             'incentiveResolver',
+            'incentiveType',
             'metricCalculation',
             'metricFilter',
             'payoutMethod',

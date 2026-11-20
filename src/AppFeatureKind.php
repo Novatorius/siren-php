@@ -44,6 +44,20 @@ namespace Siren\Sdk;
  *     conversions: list<array{conversionId: int, engagementId: int, collaboratorId: int, collaboratorStatus: string, score: int, engagementCreatedDate: string}>,
  * }
  * @phpstan-type AppRewardAnswer array{outcome: 'rewards', units: string, rewards: array<int|string, int|null>}
+ * @phpstan-type AppIncentiveTypeEngagement array{engagementId: int, collaboratorId: int, score: int|float, createdDate: string}
+ * @phpstan-type AppIncentiveTypeQuestion array{
+ *     reason: 'sale'|'refund',
+ *     program: array{id: int, name: string, units: string},
+ *     conversionType: 'sale'|'lead'|'renewal',
+ *     opportunity: array{id: int},
+ *     transaction: array{id: int, status: string, units: string, currency: AppCurrency|null, total: int, lines: list<array{id: int, type: string, name: string, quantity: int|float, value: int}>}|null,
+ *     binding: array{type: string, id: string}|null,
+ *     engagements: list<AppIncentiveTypeEngagement>,
+ *     conversions?: list<array{conversionId: int, engagementId: int}>
+ * }
+ * @phpstan-type AppIncentiveTypeAwardAnswer array{outcome: 'award', units: string, pool: int, engagementIds: list<int>}
+ * @phpstan-type AppIncentiveTypeNoneAnswer array{outcome: 'none'}
+ * @phpstan-type AppIncentiveTypeAnswer AppIncentiveTypeAwardAnswer|AppIncentiveTypeNoneAnswer
  * @phpstan-type AppMetricCalculationQuestion array{
  *     distributor: array{id: int, name: string},
  *     distribution: array{id: int, periodEnd: string},
@@ -104,6 +118,17 @@ final class AppFeatureKind
     public const INCENTIVE_RESOLVER = AppItemKind::INCENTIVE_RESOLVER;
 
     /**
+     * An ask which engagements one sale, lead or renewal converts, picked on
+     * a program as its incentive type. The question is an
+     * `AppIncentiveTypeQuestion`: the program, the transaction (null for a
+     * lead) and the engagements the program holds on the opportunity. The
+     * answer is an `AppIncentiveTypeAnswer`: the program's units, a pool of
+     * 0 or more and the engagements of the question that convert, each once,
+     * or `['outcome' => 'none']`. The program's resolver divides the pool.
+     */
+    public const INCENTIVE_TYPE = AppItemKind::INCENTIVE_TYPE;
+
+    /**
      * An ask to pay a payout, such as `['payoutId' => 88, 'amount' => 2500, 'currency' => 'USD']`.
      * The answer carries a text `outcome`, such as `['outcome' => 'paid', 'reference' => 'TX-1']`.
      */
@@ -128,5 +153,5 @@ final class AppFeatureKind
     public const TELLS = [self::POST_CONVERSION_ACTION, self::POST_ALLOCATION_ACTION];
 
     /** The kinds Siren asks, which wait for an answer. */
-    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER];
+    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER, self::INCENTIVE_TYPE];
 }

@@ -24,6 +24,7 @@ final class AppMetricKindsTest extends TestCase
             'customEvent',
             'distributionResolver',
             'incentiveResolver',
+            'incentiveType',
             'metricCalculation',
             'metricFilter',
             'payoutMethod',
