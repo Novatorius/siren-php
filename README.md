@@ -358,9 +358,17 @@ answer stands. When Siren takes no answer from the key,
 
 `AppItemKind` names each kind as `$request->item['kind']` carries it. The SDK
 checks only what every answer needs, so Siren checks the rest of each kind's
-answer and refuses one that doesn't fit with 422. An incentive resolver
-(`AppItemKind::INCENTIVE_RESOLVER`) splits a program's reward among the
-collaborators a sale, renewal or lead converted. Its question holds the
+answer and refuses one that doesn't fit with 422. A metric calculation
+(`AppItemKind::METRIC_CALCULATION`) scores a metric for a distributor and
+answers a score for each collaborator. Siren takes at most 50 results, each
+collaborator once and each in the organization and not in the trash, and each
+score a whole number of 0 or more. An empty list scores nobody. A metric
+filter (`AppItemKind::METRIC_FILTER`) answers whether one collaborator's
+metric counts: allow it, or suppress it with a plain text reason of 1 to 200
+characters.
+
+An incentive resolver (`AppItemKind::INCENTIVE_RESOLVER`) splits a program's
+reward among the collaborators a sale, renewal or lead converted. Its question holds the
 `program`, the `conversionType`, the `transaction` (null for a lead), the
 reward `pool` as a stored whole number, and the `conversions`, each with its
 engagement `score`. `reason` is `sale`, or `refund` when a partial refund asks
@@ -376,6 +384,20 @@ that throws `ConflictException` with code `app_request_dropped`.
 
 ```php
 use Siren\Sdk\AppItemKind;
+
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::METRIC_CALCULATION) {
+    $siren->apps->requests->answer($request->id, [
+        'outcome' => 'scores',
+        'results' => [['collaboratorId' => 7, 'score' => 10]],
+    ]);
+}
+
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::METRIC_FILTER) {
+    $collaboratorId = $request->data['collaborator']['id'];
+    $siren->apps->requests->answer($request->id, ownsCustomer($collaboratorId)
+        ? ['outcome' => 'suppress', 'reason' => 'Customer already owned by a partner']
+        : ['outcome' => 'allow']);
+}
 
 if ($request->isAsk() && $request->item['kind'] === AppItemKind::INCENTIVE_RESOLVER) {
     $pool = $request->data['pool'];
