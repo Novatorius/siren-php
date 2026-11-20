@@ -15,15 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   feature, `onEvent($type, $fn)` one per webhook event at the same address,
   and `serve()`, `psr15()` (an `AppRequestPsrHandler`) and `answer()` (an
   `AppRequestReply`) mount it. It replies 405 to a method other than POST,
-  500 to a body a parser already read, 401 to a request `verifyRequest()`
-  refuses, 400 to a body that is not JSON or not a version 1 request, 200
+  413 to a body over 1 MiB, 500 to a body a parser already read, 401 to a
+  request `verifyRequest()` refuses, 400 to a body that is not a JSON object
+  or not a version 1 request, 200
   after a tell's function returns and 500 when it throws, 200 at once to an
   ask, 404 to a feature with no function, and 200 to any other event. An
   ask's function runs after the reply, and the handler posts the answer it
   returns to `POST /apps/requests/{id}/answer`, sent again after a lost
   connection, a 429 or a 5xx inside `maxRetries`, and never after a 4xx
   refusal, which goes to `onError`. Options: `toleranceSeconds`, `runLater`
-  and `onError`.
+  and `onError`. On RoadRunner, Swoole, Octane or FrankenPHP's worker mode,
+  `psr15()` with no `runLater` answers an ask 500 and tells `onError` to
+  pass one, since those workers run shutdown functions only when they stop.
 - `Apps::splitPool($pool, $weights)` splits a resolver's pool by weight in
   whole steps of the pool's currency, rounded down so the sum never passes
   `pool.value`, and evenly when every weight is 0. It throws

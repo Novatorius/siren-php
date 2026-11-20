@@ -27,6 +27,17 @@ use Psr\Http\Server\RequestHandlerInterface;
  * after `fastcgi_finish_request()` where the server has it. With the
  * handler's `runLater`, the work goes there instead.
  *
+ * RoadRunner, Swoole, Octane and FrankenPHP's worker mode keep one PHP
+ * worker running for many requests, and run shutdown functions only when it
+ * stops. On those servers pass `runLater`, a function that runs the work
+ * once the response has gone, such as
+ * `'runLater' => fn ($work) => app()->terminating($work)` under Octane or
+ * `'runLater' => fn ($work) => \Swoole\Coroutine::create($work)` under
+ * Swoole. Without it, the handler finds such a server where it can (by
+ * `RR_MODE`, `LARAVEL_OCTANE`, `FRANKENPHP_WORKER` or a Swoole coroutine),
+ * answers an ask 500 and tells `onError` to pass `runLater`, rather than hold
+ * the answer until the worker stops.
+ *
  * Needs `psr/http-server-handler`, and builds responses with the PSR-17
  * factories passed or the first of Guzzle's, Nyholm's, Slim's or Laminas's
  * that is installed.
@@ -64,12 +75,24 @@ final class AppRequestPsrHandler implements RequestHandlerInterface
             $stream->rewind();
         }
 
-        $raw = $stream->isReadable() ? $stream->getContents() : '';
+        $raw = '';
+
+        // One byte past the limit is enough to refuse the body with 413.
+        while ($stream->isReadable() && !$stream->eof() && strlen($raw) <= AppRequestHandler::BODY_LIMIT) {
+            $chunk = $stream->read(AppRequestHandler::BODY_LIMIT + 1 - strlen($raw));
+
+            if ($chunk === '') {
+                break;
+            }
+
+            $raw .= $chunk;
+        }
+
         $parsed = $request->getParsedBody();
         /** @var array<string, list<string>> $headers */
         $headers = $request->getHeaders();
 
-        $reply = $this->handler->answer(
+        $reply = $this->handler->answerForShutdown(
             $request->getMethod(),
             $raw === '' && $parsed !== null ? (is_array($parsed) ? $parsed : null) : $raw,
             $headers,

@@ -330,6 +330,7 @@ An action after a conversion, a tell:
 <!-- readme-test: answer-tell -->
 ```php
 <?php
+require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
 $siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
@@ -396,9 +397,10 @@ kind's question and answer as PHPStan types, such as
 | Request | Reply |
 |---------|-------|
 | Not a POST | 405 `{"error"}` |
+| A body over 1 MiB, more than Siren sends | 413 `{"error"}` |
 | A body a parser already read, so there are no bytes to check | 500 `{"error"}` that says to mount the handler before the JSON parser, or give the route a raw body. `onError` hears it too. |
 | `X-Siren-Signature-V2` missing or wrong, `X-Siren-Timestamp` different from the signed time, or a time more than `toleranceSeconds` from the clock | 401 `{"error"}` with `verifyRequest()`'s words |
-| A signed body that is not JSON, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
+| A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
 | A tell with a function | 200 `{}` once the function returns, or 500 when it throws, so Siren tries again about 1, 2, 4 and 8 minutes later |
 | An ask with a function | 200 `{}` at once, then the function runs and the answer it returns is posted |
 | An `app.request` for a feature with no function | 404 `{"error": "No function handles distributionResolver split-by-score."}`, so Siren tries again and then shows the request under Needs attention |
@@ -452,6 +454,21 @@ work from a shutdown function once the framework has sent the response.
 ```php
 $app->post('/siren', $answers->psr15());
 ```
+
+RoadRunner, Swoole, Octane and FrankenPHP's worker mode keep one PHP worker
+running for many requests and run shutdown functions only when it stops, so
+on those servers pass `runLater`, a function that runs the work once the
+response has gone:
+
+```php
+$answers = $siren->apps->requestHandler($secret, ['runLater' => fn ($work) => app()->terminating($work)]); // Octane
+```
+
+Under Swoole, `fn ($work) => \Swoole\Coroutine::create($work)` does it. Under
+RoadRunner, keep the work in a list and run it after `$worker->respond()`.
+Without `runLater`, `psr15()` finds such a server where it can and answers an
+ask 500, with `onError` told to pass `runLater`, rather than hold the answer
+until the worker stops.
 
 `answer($method, $rawBody, $headers)` answers one request in any other
 framework, and returns an `AppRequestReply` with `status`, `headers`, `body`

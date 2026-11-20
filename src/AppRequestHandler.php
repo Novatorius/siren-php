@@ -34,9 +34,10 @@ use Siren\Sdk\Resources\Webhooks;
  * | Request | Reply |
  * |---|---|
  * | Not a POST | 405 `{"error"}` |
+ * | A body over {@see BODY_LIMIT} bytes, more than Siren sends | 413 `{"error"}` |
  * | A body a parser already read, so no bytes to check | 500 `{"error"}`, and `onError` hears why |
  * | A failed check of {@see Apps::verifyRequest()}: the signature, the timestamp header or the time | 401 `{"error"}` with its words |
- * | A signed body that is not JSON, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
+ * | A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
  * | A tell with a function | 200 `{}` once the function returns, or 500 when it throws |
  * | An ask with a function | 200 `{}` at once. The function runs after the reply, and the answer it returns is posted |
  * | An `app.request` for a feature with no function | 404 `{"error": "No function handles <kind> <key>."}` |
@@ -62,6 +63,18 @@ final class AppRequestHandler
     /** Why a body a parser already read gets a 500. Siren's delivery history shows these words. */
     public const RAW_BODY_NEEDED = 'The request handler got a body a parser already read, so it cannot check the signature, '
         . 'which covers the exact bytes Siren sent. Mount the handler before the JSON parser, or give the route a raw body.';
+
+    /** The largest body the handler reads, 1 MiB. Siren's requests are far smaller. */
+    public const BODY_LIMIT = 1048576;
+
+    /**
+     * Why a PSR-15 ask gets a 500 on a server that keeps PHP workers running.
+     * Such a worker runs shutdown functions only when it stops, so the
+     * answer would wait until then.
+     */
+    public const RUN_LATER_NEEDED = 'This server keeps PHP workers running, as RoadRunner, Swoole, Octane and FrankenPHP\'s worker mode do, '
+        . 'so an answer left to a shutdown function would wait until the worker stops. Pass runLater to apps->requestHandler(), '
+        . 'a function that runs the work once the response has gone.';
 
     private const JSON_HEADERS = ['Content-Type' => 'application/json', 'Cache-Control' => 'no-store'];
 
@@ -224,8 +237,64 @@ final class AppRequestHandler
      */
     public function answer(string $method, string|array|null $rawBody, array $headers): AppRequestReply
     {
+        return $this->respond($method, $rawBody, $headers, false);
+    }
+
+    /**
+     * {@see answer()} for {@see AppRequestPsrHandler}, which runs an ask's
+     * work from a shutdown function. On a server that keeps workers running
+     * and with no `runLater`, an ask gets 500 and `onError` hears why.
+     *
+     * @internal
+     *
+     * @param string|array<mixed>|null           $rawBody
+     * @param array<string, string|list<string>> $headers
+     */
+    public function answerForShutdown(string $method, string|array|null $rawBody, array $headers): AppRequestReply
+    {
+        return $this->respond($method, $rawBody, $headers, $this->runLater === null && self::keepsWorkersRunning());
+    }
+
+    /**
+     * Whether this PHP process serves many requests in one worker that
+     * stays running: RoadRunner sets `RR_MODE`, Octane `LARAVEL_OCTANE` and
+     * FrankenPHP's worker mode `FRANKENPHP_WORKER`, and Swoole and OpenSwoole
+     * serve each request inside a coroutine.
+     *
+     * @internal
+     */
+    public static function keepsWorkersRunning(): bool
+    {
+        foreach (['RR_MODE', 'LARAVEL_OCTANE', 'FRANKENPHP_WORKER'] as $name) {
+            $value = $_SERVER[$name] ?? $_ENV[$name] ?? getenv($name);
+
+            if (is_scalar($value) && $value !== '' && $value !== false) {
+                return true;
+            }
+        }
+
+        foreach (['Swoole\\Coroutine::getCid', 'OpenSwoole\\Coroutine::getCid'] as $currentCoroutine) {
+            // Each answers -1 outside a coroutine, and Swoole serves every request inside one.
+            if (is_callable($currentCoroutine) && $currentCoroutine() > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param string|array<mixed>|null           $rawBody
+     * @param array<string, string|list<string>> $headers
+     */
+    private function respond(string $method, string|array|null $rawBody, array $headers, bool $workHeld): AppRequestReply
+    {
         if (strtoupper($method) !== 'POST') {
             return self::reply(405, 'Siren sends its requests with POST, and this address takes nothing else.', ['Allow' => 'POST']);
+        }
+
+        if (is_string($rawBody) && strlen($rawBody) > self::BODY_LIMIT) {
+            return self::reply(413, sprintf('The request body is over %d bytes, more than Siren sends.', self::BODY_LIMIT));
         }
 
         if (!is_string($rawBody)) {
@@ -250,13 +319,14 @@ final class AppRequestHandler
 
         if ($event === null || $event === Apps::REQUEST_EVENT) {
             try {
-                return $this->route(Apps::requestFrom($body, $t, $headers));
+                return $this->route(Apps::requestFrom($body, $t, $headers), $workHeld);
             } catch (SignatureVerificationException $e) {
                 return self::reply(400, $e->getMessage());
             }
         }
 
-        if (!is_array($body)) {
+        // `{}` and `[]` both decode to an empty array, so the first byte tells them apart.
+        if (!is_array($body) || !str_starts_with(ltrim($rawBody), '{')) {
             return self::reply(400, 'The signed body is not a JSON object.');
         }
 
@@ -290,7 +360,8 @@ final class AppRequestHandler
      */
     public function serve(): void
     {
-        $raw = file_get_contents('php://input');
+        // One byte past the limit is enough to refuse the body with 413.
+        $raw = file_get_contents('php://input', false, null, 0, self::BODY_LIMIT + 1);
         $method = $_SERVER['REQUEST_METHOD'] ?? '';
         $reply = $this->answer(is_string($method) ? $method : '', $raw === false ? null : $raw, self::requestHeaders());
 
@@ -351,7 +422,7 @@ final class AppRequestHandler
         $work();
     }
 
-    private function route(AppRequest $request): AppRequestReply
+    private function route(AppRequest $request, bool $workHeld): AppRequestReply
     {
         $kind = (string) $request->item['kind'];
         $key = (string) $request->item['key'];
@@ -376,6 +447,12 @@ final class AppRequestHandler
         $work = function () use ($fn, $request): void {
             $this->work($fn, $request);
         };
+
+        if ($this->runLater === null && $workHeld) {
+            $this->report(new SirenException(self::RUN_LATER_NEEDED), $request);
+
+            return self::reply(500, self::RUN_LATER_NEEDED);
+        }
 
         if ($this->runLater === null) {
             return self::reply(200, null, [], $work);

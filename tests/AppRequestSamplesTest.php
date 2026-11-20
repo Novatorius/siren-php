@@ -16,10 +16,12 @@ use PHPUnit\Framework\Attributes\Group;
  * with a test secret and posts it, and a fake Siren
  * (tests/Support/fake-siren.php) takes the answer an ask posts back.
  *
- * Only two things are added around a sample: a prepended file that loads the
- * autoloader and stubs `addToCrm()` and `noteShare()`, and the fake Siren's
- * address in place of `https://cloud.example.com/siren/v1`, which the feature
- * page fills in.
+ * Each runs from the README's own text, which must equal the copy here. Only
+ * two things are added around a sample: a prepended file that stubs
+ * `addToCrm()` and `noteShare()`, and the fake Siren's address in place of
+ * `https://cloud.example.com/siren/v1`, which the feature page fills in. The
+ * sample's own `require 'vendor/autoload.php';` loads the SDK, through a
+ * `vendor` link beside it, as it would in an app.
  */
 #[Group('local-server')]
 final class AppRequestSamplesTest extends TestCase
@@ -32,6 +34,7 @@ final class AppRequestSamplesTest extends TestCase
     /** Section 5.1, the whole PHP sample. */
     private const TELL_THE_CRM = <<<'PHP'
 <?php
+require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
 $siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
@@ -74,8 +77,6 @@ PHP;
     /** The stubs for the sample's own helpers, prepended to every request. */
     private const PRELUDE = <<<'PHP'
 <?php
-require AUTOLOAD;
-
 function addToCrm(...$args): void
 {
     file_put_contents(getenv('STUB_LOG'), json_encode(['addToCrm', $args]) . "\n", FILE_APPEND | LOCK_EX);
@@ -90,6 +91,7 @@ PHP;
     /** The same handler mounted as PSR-15, as a Slim app would, to run the shutdown path. */
     private const PSR15 = <<<'PHP'
 <?php
+require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
 $siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
@@ -137,10 +139,10 @@ PHP;
         ]) . '/siren/v1';
 
         $samples = [
-            'tell-the-crm' => self::TELL_THE_CRM,
-            'note-the-share' => self::sample(self::NOTE_THE_SHARE),
-            'split-by-score' => self::sample(self::SPLIT_BY_SCORE),
-            'split-the-reward' => self::sample(self::SPLIT_THE_REWARD),
+            'tell-the-crm' => self::readme('answer-tell'),
+            'note-the-share' => self::sample(self::readme('answer-allocation')),
+            'split-by-score' => self::sample(self::readme('answer-distribution')),
+            'split-the-reward' => self::sample(self::readme('answer-incentive')),
             'psr15' => self::PSR15,
         ];
 
@@ -148,10 +150,8 @@ PHP;
             file_put_contents(self::$dir . '/app/' . $name . '.php', str_replace('https://cloud.example.com/siren/v1', $siren, $code));
         }
 
-        file_put_contents(
-            self::$dir . '/prelude.php',
-            str_replace('AUTOLOAD', var_export(dirname(__DIR__) . '/vendor/autoload.php', true), self::PRELUDE),
-        );
+        file_put_contents(self::$dir . '/prelude.php', self::PRELUDE);
+        symlink(dirname(__DIR__) . '/vendor', self::$dir . '/app/vendor');
 
         self::$app = 'http://127.0.0.1:' . self::serve(
             ['-d', 'auto_prepend_file=' . self::$dir . '/prelude.php', '-S', '127.0.0.1:%d', '-t', self::$dir . '/app'],
@@ -174,6 +174,7 @@ PHP;
             }
         }
 
+        @unlink(self::$dir . '/app/vendor');
         @rmdir(self::$dir . '/app');
         @rmdir(self::$dir);
     }
@@ -182,6 +183,15 @@ PHP;
     {
         file_put_contents(self::$sirenLog, '');
         file_put_contents(self::$stubLog, '');
+    }
+
+    /** A sample from the README, by its readme-test name. */
+    private static function readme(string $name): string
+    {
+        $found = preg_match('/<!-- readme-test: ' . preg_quote($name, '/') . ' -->\n```php\n(.*?)\n```/s', (string) file_get_contents(dirname(__DIR__) . '/README.md'), $matches);
+        self::assertSame(1, $found, 'The README has no sample named ' . $name);
+
+        return $matches[1];
     }
 
     /** 5.1 with its function swapped for another section's, as the note says only the function changes. */
@@ -193,9 +203,10 @@ PHP;
         addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
     })
 PHP;
-        self::assertStringContainsString($tell, self::TELL_THE_CRM);
+        $whole = self::readme('answer-tell');
+        self::assertStringContainsString($tell, $whole);
 
-        return str_replace($tell, $function, self::TELL_THE_CRM);
+        return str_replace($tell, $function, $whole);
     }
 
     private static function secret(): string
@@ -337,6 +348,17 @@ PHP;
         $this->assertSame($at, array_values(array_filter($at, static fn($offset): bool => $offset > $section)), 'The samples sit in the section.');
         $this->assertLessThan(strpos($readme, '#### What the handler replies'), max($at), 'The samples lead the section.');
         $this->assertGreaterThan(strpos($readme, '### Check and answer by hand'), strpos($readme, "\$request = \$siren->apps->verifyRequest("), 'verifyRequest is under the low-level path.');
+    }
+
+    public function testABodyOverOneMebibyteGets413(): void
+    {
+        $response = (new Client(['http_errors' => false, 'timeout' => 10]))->post(self::$app . '/tell-the-crm.php', [
+            'body' => str_repeat('a', 1024 * 1024 + 1),
+            'headers' => ['Content-Type' => 'application/json', 'X-Siren-Event' => 'app.request'],
+        ]);
+
+        $this->assertSame(413, $response->getStatusCode());
+        $this->assertSame([], self::lines(self::$stubLog));
     }
 
     public function testAnUnsignedRequestGets401AndRunsNothing(): void

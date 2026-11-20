@@ -254,6 +254,8 @@ final class AppRequestHandlerTest extends TestCase
             'a list' => ['[1, 2]', 'app.request'],
             'an event that is not JSON' => ['not json', 'conversion.approved'],
             'an event that is a number' => ['42', 'conversion.approved'],
+            'an event that is a list' => ['[1, 2]', 'conversion.approved'],
+            'an event that is an empty list' => ['[]', 'conversion.approved'],
         ];
     }
 
@@ -855,5 +857,132 @@ final class AppRequestHandlerTest extends TestCase
 
         $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         $this->assertSame(1, $tells);
+    }
+
+    public function testAnEventThatIsAnEmptyObjectReachesItsFunction(): void
+    {
+        $seen = [];
+        $handler = $this->handler()->onEvent('app.pinged', function (WebhookEvent $event) use (&$seen): void {
+            $seen[] = $event->getData();
+        });
+
+        $this->assertReply(200, $handler->answer('POST', ' {}', self::signed(' {}', null, 'app.pinged')));
+        $this->assertSame([[]], $seen);
+    }
+
+    // A body past 1 MiB, more than Siren sends, as Node refuses it (AP-A3382).
+
+    public function testABodyOverOneMebibyteGets413BeforeAnyCheck(): void
+    {
+        $ran = false;
+        $handler = $this->handler()->onEvent('conversion.approved', function () use (&$ran): void {
+            $ran = true;
+        });
+        $big = '{"note":"' . str_repeat('a', AppRequestHandler::BODY_LIMIT) . '"}';
+
+        $reply = $handler->answer('POST', $big, self::signed($big, null, 'conversion.approved'));
+
+        $this->assertReply(413, $reply);
+        $this->assertFalse($ran);
+
+        $fits = '{"note":"' . str_repeat('a', AppRequestHandler::BODY_LIMIT - 11) . '"}';
+        $this->assertSame(AppRequestHandler::BODY_LIMIT, strlen($fits));
+        $this->assertReply(200, $handler->answer('POST', $fits, self::signed($fits, null, 'conversion.approved')));
+        $this->assertTrue($ran);
+    }
+
+    public function testThePsr15HandlerStopsReadingPastOneMebibyte(): void
+    {
+        $handler = $this->handler()->psr15();
+        $stream = Utils::streamFor(fopen('php://temp', 'r+'));
+        $stream->write(str_repeat('a', 3 * AppRequestHandler::BODY_LIMIT));
+        $stream->rewind();
+
+        $response = $handler->handle((new ServerRequest('POST', '/siren', ['X-Siren-Event' => 'app.request']))->withBody($stream));
+
+        $this->assertSame(413, $response->getStatusCode());
+        $this->assertLessThanOrEqual(AppRequestHandler::BODY_LIMIT + 8192, $stream->tell(), 'It read no more than it needed to refuse.');
+    }
+
+    // A server that keeps PHP workers running holds shutdown functions until the worker stops.
+
+    /** @return array<string, array{string, string, string}> */
+    public static function workers(): array
+    {
+        return [
+            'RoadRunner' => ['env', 'RR_MODE', 'http'],
+            'Octane' => ['server', 'LARAVEL_OCTANE', '1'],
+            'FrankenPHP worker mode' => ['server', 'FRANKENPHP_WORKER', '1'],
+        ];
+    }
+
+    #[DataProvider('workers')]
+    public function testThePsr15HandlerOnAWorkerServerRefusesAnAskWithNoRunLater(string $where, string $name, string $value): void
+    {
+        $this->asWorker($where, $name, $value, function (): void {
+            $ran = false;
+            $tells = 0;
+            $handler = $this->handler()
+                ->on('distributionResolver', function () use (&$ran): array {
+                    $ran = true;
+
+                    return ['outcome' => 'allocated'];
+                })
+                ->on('postConversionAction', function () use (&$tells): void {
+                    $tells++;
+                });
+            $psr = $handler->psr15();
+
+            $ask = self::body('distributionResolver');
+            $response = $psr->handle(new ServerRequest('POST', '/siren', self::signed($ask), $ask));
+
+            $this->assertSame(500, $response->getStatusCode());
+            $this->assertStringContainsString('runLater', json_decode((string) $response->getBody(), true)['error']);
+            $this->assertSame('', $response->getHeaderLine('Connection'));
+            $this->assertFalse($ran);
+            $this->assertCount(1, $this->errors);
+            $this->assertStringContainsString('runLater', $this->errors[0][0]->getMessage());
+            $this->assertInstanceOf(AppRequest::class, $this->errors[0][1]);
+
+            $tell = self::body('postConversionAction');
+            $this->assertSame(200, $psr->handle(new ServerRequest('POST', '/siren', self::signed($tell), $tell))->getStatusCode(), 'A tell needs no runLater.');
+            $this->assertSame(1, $tells);
+
+            $this->assertSame(200, $handler->answer('POST', $ask, self::signed($ask))->status, 'answer() leaves the work to its caller, as before.');
+        });
+    }
+
+    public function testThePsr15HandlerOnAWorkerServerUsesRunLater(): void
+    {
+        $this->asWorker('env', 'RR_MODE', 'http', function (): void {
+            $later = [];
+            $psr = $this->handler([self::jsonResponse(200, ['status' => 'accepted'])], ['runLater' => function (callable $work) use (&$later): void {
+                $later[] = $work;
+            }])->on('distributionResolver', static fn(): array => self::contracts()['kinds']['distributionResolver']['answer'])->psr15();
+            $ask = self::body('distributionResolver');
+
+            $this->assertSame(200, $psr->handle(new ServerRequest('POST', '/siren', self::signed($ask), $ask))->getStatusCode());
+            $later[0]();
+            $this->assertCount(1, $this->history);
+            $this->assertSame([], $this->errors);
+        });
+    }
+
+    private function asWorker(string $where, string $name, string $value, callable $test): void
+    {
+        $before = $where === 'env' ? getenv($name) : ($_SERVER[$name] ?? null);
+        $where === 'env' ? putenv($name . '=' . $value) : $_SERVER[$name] = $value;
+
+        try {
+            $test();
+        } finally {
+            if ($where === 'env') {
+                putenv($before === false ? $name : $name . '=' . $before);
+            } elseif ($before === null) {
+                unset($_SERVER[$name]);
+            } else {
+                $_SERVER[$name] = $before;
+            }
+        }
     }
 }
