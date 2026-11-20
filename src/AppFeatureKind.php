@@ -44,6 +44,12 @@ namespace Siren\Sdk;
  *     conversions: list<array{conversionId: int, engagementId: int, collaboratorId: int, collaboratorStatus: string, score: int, engagementCreatedDate: string}>,
  * }
  * @phpstan-type AppRewardAnswer array{outcome: 'rewards', units: string, rewards: array<int|string, int|null>}
+ * @phpstan-type AppPayoutQuestion array{
+ *     payout: array{id: int, fulfillmentId: int, attempt: int},
+ *     amount: array{value: int, units: string, currency: AppCurrency},
+ *     collaborator: array{id: int, name: string, email: string},
+ * }
+ * @phpstan-type AppPayoutAnswer array{outcome: 'paid', reference: string}|array{outcome: 'failed', reason: string}
  * @phpstan-type AppMetricCalculationQuestion array{
  *     distributor: array{id: int, name: string},
  *     distribution: array{id: int, periodEnd: string},
@@ -104,8 +110,16 @@ final class AppFeatureKind
     public const INCENTIVE_RESOLVER = AppItemKind::INCENTIVE_RESOLVER;
 
     /**
-     * An ask to pay a payout, such as `['payoutId' => 88, 'amount' => 2500, 'currency' => 'USD']`.
-     * The answer carries a text `outcome`, such as `['outcome' => 'paid', 'reference' => 'TX-1']`.
+     * An ask to pay one payout, picked on an autofulfiller's currency. The
+     * question is an `AppPayoutQuestion`: the `payout` (`attempt` starts at 1
+     * and rises when Siren asks again about the same payout), the `amount` as
+     * a stored whole number in the currency's smallest unit, and the
+     * `collaborator`. The answer is an `AppPayoutAnswer`: `paid` with a
+     * `reference` of 1 to 191 characters, the payment's id in the app's own
+     * system, or `failed` with a `reason` of 1 to 500 characters. Pay each
+     * payout id at most once. When Siren asks again about a payout the app
+     * already paid, answer `paid` with the first reference. Siren drops an ask
+     * after 24 hours with no answer and marks the payout failed.
      */
     public const PAYOUT_METHOD = AppItemKind::PAYOUT_METHOD;
 

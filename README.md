@@ -582,6 +582,32 @@ if ($request->isAsk() && $request->item['kind'] === AppItemKind::INCENTIVE_RESOL
 }
 ```
 
+A payout method (`AppItemKind::PAYOUT_METHOD`) is asked to pay one payout. Its
+question holds the `payout` (`id`, `fulfillmentId` and `attempt`), the `amount`
+to pay as a stored whole number in the currency's smallest unit, and the
+`collaborator` (`id`, `name` and `email`). `attempt` starts at 1 and rises when
+Siren asks again about the same payout, such as after a failed answer and a
+retry. The answer is `['outcome' => 'paid', 'reference' => ...]`, where the
+reference is 1 to 191 characters, the payment's id in the app's own system, or
+`['outcome' => 'failed', 'reason' => ...]`, where the reason is 1 to 500
+characters.
+
+This moves money, so the app pays each payout id at most once. When Siren asks
+again about a payout the app already paid, the app answers `paid` with the
+first reference and pays nothing more. Siren drops an ask after 24 hours with
+no answer and marks the payout failed. An answer after that throws
+`ConflictException` with code `app_request_dropped`.
+
+```php
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::PAYOUT_METHOD) {
+    ['payout' => $payout, 'amount' => $amount, 'collaborator' => $collaborator] = $request->data;
+    $reference = $ledger->payOnce((string) $payout['id'], $amount['value'], $collaborator['email']);
+    $siren->apps->requests->answer($request->id, $reference !== null
+        ? ['outcome' => 'paid', 'reference' => $reference]
+        : ['outcome' => 'failed', 'reason' => 'The account is closed.']);
+}
+```
+
 ### Which credential does each call need?
 
 | Calls | Credential |
