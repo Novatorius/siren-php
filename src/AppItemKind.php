@@ -53,6 +53,16 @@ final class AppItemKind
      */
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
 
+    /**
+     * An ask for the order to try a program group's programs in for one sale
+     * or lead, picked on a program group as its structure. The app answers
+     * `['outcome' => 'sorted', 'programIds' => [9, 12]]`, every program id
+     * of the question exactly once. The first program that converts wins
+     * the group. The group's award waits for the answer, 24 hours from the
+     * first ask at most.
+     */
+    public const PROGRAM_GROUP_SORTER = 'programGroupSorter';
+
     private function __construct()
     {
     }

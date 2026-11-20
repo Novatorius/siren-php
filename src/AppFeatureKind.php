@@ -67,6 +67,14 @@ namespace Siren\Sdk;
  *     sale: array<string, mixed>|null,
  * }
  * @phpstan-type AppMetricFilterAnswer array{outcome: 'allow'}|array{outcome: 'suppress', reason: string}
+ * @phpstan-type AppGroupOrderQuestion array{
+ *     group: array{id: int, name: string},
+ *     conversionType: string,
+ *     opportunity: array{id: int},
+ *     transaction: array{id: int, units: string, total: int}|null,
+ *     programs: list<array{id: int, name: string, engagements: list<array{engagementId: int, collaboratorId: int, score: int, createdDate: string}>}>,
+ * }
+ * @phpstan-type AppGroupOrderAnswer array{outcome: 'sorted', programIds: list<int>}
  */
 final class AppFeatureKind
 {
@@ -124,9 +132,19 @@ final class AppFeatureKind
      */
     public const METRIC_FILTER = AppItemKind::METRIC_FILTER;
 
+    /**
+     * An ask for the order to try a program group's programs in for one sale
+     * or lead, picked on a program group as its structure. The question is an
+     * `AppGroupOrderQuestion`: the group's programs that take the
+     * conversion, in the group's order, each with its active engagements on
+     * the opportunity. The answer is an `AppGroupOrderAnswer`: every program
+     * id of the question exactly once, in the order Siren tries them.
+     */
+    public const PROGRAM_GROUP_SORTER = AppItemKind::PROGRAM_GROUP_SORTER;
+
     /** The kinds Siren tells, which wait for no answer. */
     public const TELLS = [self::POST_CONVERSION_ACTION, self::POST_ALLOCATION_ACTION];
 
     /** The kinds Siren asks, which wait for an answer. */
-    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER];
+    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER, self::PROGRAM_GROUP_SORTER];
 }
