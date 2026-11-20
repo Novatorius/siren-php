@@ -32,6 +32,7 @@ final class AppIncentiveResolverTest extends TestCase
             'payoutMethod',
             'postAllocationAction',
             'postConversionAction',
+            'transactionFilter',
         ], $values);
         $this->assertSame('incentiveResolver', AppItemKind::INCENTIVE_RESOLVER);
     }

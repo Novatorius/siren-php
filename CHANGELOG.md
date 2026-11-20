@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `AppItemKind::TRANSACTION_FILTER` and `AppFeatureKind::TRANSACTION_FILTER`
+  (`transactionFilter`), the feature kind a program or a distributor picks to
+  let the app say which of a sale's own lines count. Siren's catalog calls it
+  a transaction compiler. Siren asks it once per sale for each program or
+  distributor that picks it, and a refund reuses the stored answer.
+  `AppFeatureKind` lists it in `ASKS` and holds the PHPStan types
+  `AppTransactionFilterQuestion`, `AppTransactionLine` and
+  `AppTransactionFilterAnswer`, the ids of the lines to include. Siren refuses
+  a line id the question lacks with 422 `app_answer_invalid`. The README shows
+  the question and a handler that counts only `lineItem` lines.
 - `$siren->apps->requestHandler($signingSecret, $options)` answers Siren's
   requests to an app in a few lines and returns an `AppRequestHandler`.
   `on($kind, $key, $fn)` and `on($kind, $fn)` register a function per

@@ -53,6 +53,16 @@ final class AppItemKind
      */
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
 
+    /**
+     * An ask for which of a sale's own lines count, picked on a program or a
+     * distributor. Siren's catalog calls it a transaction compiler. Siren
+     * asks once per sale for each program or distributor that picks it. The
+     * app answers `['outcome' => 'filtered', 'include' => [5501, 5502]]`, the
+     * ids of the question's lines to include, each at most once. An empty
+     * list includes nothing, and Siren refuses an id the question lacks.
+     */
+    public const TRANSACTION_FILTER = 'transactionFilter';
+
     private function __construct()
     {
     }

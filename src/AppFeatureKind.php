@@ -67,6 +67,22 @@ namespace Siren\Sdk;
  *     sale: array<string, mixed>|null,
  * }
  * @phpstan-type AppMetricFilterAnswer array{outcome: 'allow'}|array{outcome: 'suppress', reason: string}
+ * @phpstan-type AppTransactionLine array{
+ *     id: int,
+ *     type: 'lineItem'|'discount'|'fee'|'shipping'|'tax',
+ *     name: string,
+ *     quantity: int,
+ *     value: int,
+ *     productId: string|null,
+ * }
+ * @phpstan-type AppTransactionFilterQuestion array{
+ *     for: array{type: 'program'|'distributor', id: int, name: string},
+ *     transaction: array{id: int, units: string, currency: AppCurrency},
+ *     lines: list<AppTransactionLine>,
+ *     distribution: array{id: int}|null,
+ *     refundDistribution: array{id: int}|null,
+ * }
+ * @phpstan-type AppTransactionFilterAnswer array{outcome: 'filtered', include: list<int>}
  */
 final class AppFeatureKind
 {
@@ -124,9 +140,25 @@ final class AppFeatureKind
      */
     public const METRIC_FILTER = AppItemKind::METRIC_FILTER;
 
+    /**
+     * An ask for which of a sale's own lines count, once per sale for each
+     * program or distributor that picks the filter. Siren's catalog calls it
+     * a transaction compiler. The subject id is
+     * `{opportunityId}:{programId}:t{transactionId}` for a program's lines and
+     * `{distributorId}:t{transactionId}` for a distributor's. The question is
+     * an `AppTransactionFilterQuestion`: what the filter is `for`, the
+     * `transaction` with its currency, the sale's `lines`, each an
+     * `AppTransactionLine` whose `value` is the stored unit value, and the
+     * `distribution` and `refundDistribution` periods, null for a program.
+     * The answer is an `AppTransactionFilterAnswer`, the ids of the lines to
+     * include, each at most once. A refund reuses the stored answer, so Siren
+     * never sends refund lines.
+     */
+    public const TRANSACTION_FILTER = AppItemKind::TRANSACTION_FILTER;
+
     /** The kinds Siren tells, which wait for no answer. */
     public const TELLS = [self::POST_CONVERSION_ACTION, self::POST_ALLOCATION_ACTION];
 
     /** The kinds Siren asks, which wait for an answer. */
-    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER];
+    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER, self::TRANSACTION_FILTER];
 }
