@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `AppItemKind::COLLABORATOR_GROUP_STRUCTURE` and
+  `AppFeatureKind::COLLABORATOR_GROUP_STRUCTURE` (`collaboratorGroupStructure`),
+  the feature kind a collaborator group picks to let the app give the group's
+  shape. Siren asks it once per cascade trigger on the group, for a program or
+  a distributor. `AppFeatureKind` lists it in `ASKS` and holds the PHPStan
+  types `AppCollaboratorGroupStructureQuestion`,
+  `AppCollaboratorGroupStructureDistributorQuestion` and
+  `AppCollaboratorGroupStructureAnswer`, a chain or a tree. Siren refuses an
+  answer that leaves out or repeats a member, names one outside the group, or
+  makes a cycle with 422 `app_answer_invalid`. The README shows the question
+  and both answers.
 - `$siren->apps->requestHandler($signingSecret, $options)` answers Siren's
   requests to an app in a few lines and returns an `AppRequestHandler`.
   `on($kind, $key, $fn)` and `on($kind, $fn)` register a function per

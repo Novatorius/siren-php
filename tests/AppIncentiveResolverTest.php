@@ -24,6 +24,7 @@ final class AppIncentiveResolverTest extends TestCase
         sort($values);
 
         $this->assertSame([
+            'collaboratorGroupStructure',
             'customEvent',
             'distributionResolver',
             'incentiveResolver',

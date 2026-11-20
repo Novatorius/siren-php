@@ -21,6 +21,7 @@ final class AppMetricKindsTest extends TestCase
         sort($values);
 
         $this->assertSame([
+            'collaboratorGroupStructure',
             'customEvent',
             'distributionResolver',
             'incentiveResolver',

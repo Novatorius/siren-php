@@ -53,6 +53,18 @@ final class AppItemKind
      */
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
 
+    /**
+     * An ask for a collaborator group's shape, picked on the group. Siren
+     * asks once per cascade trigger on the group, for a program or a
+     * distributor. The app answers a chain,
+     * `['outcome' => 'structure', 'shape' => 'chain', 'order' => [63, 57, 42]]`,
+     * with every member's collaborator id once, top first, or a tree,
+     * `['outcome' => 'structure', 'shape' => 'tree', 'parents' => ['42' => 57, '57' => 63, '63' => null]]`,
+     * with every member's id once as a key, each mapped to another member's
+     * id or null for a top member, and no cycle.
+     */
+    public const COLLABORATOR_GROUP_STRUCTURE = 'collaboratorGroupStructure';
+
     private function __construct()
     {
     }

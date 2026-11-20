@@ -67,6 +67,30 @@ namespace Siren\Sdk;
  *     sale: array<string, mixed>|null,
  * }
  * @phpstan-type AppMetricFilterAnswer array{outcome: 'allow'}|array{outcome: 'suppress', reason: string}
+ * @phpstan-type AppCollaboratorGroupStructureQuestion array{
+ *     group: array{id: int, name: string},
+ *     members: list<array{collaboratorId: int, name: string, metadata: array<string, mixed>}>,
+ *     for: array{type: 'program'|'distributor', id: int},
+ *     triggeringCollaborator: array{id: int, name: string},
+ *     cause: array{id: string, ...},
+ *     ...
+ * }
+ * @phpstan-type AppCollaboratorGroupStructureDistributorQuestion array{
+ *     group: array{id: int, name: string},
+ *     members: list<array{collaboratorId: int, name: string, metadata: array<string, mixed>}>,
+ *     for: array{type: 'distributor', id: int},
+ *     triggeringCollaborator: array{id: int, name: string},
+ *     cause: array{id: string, type: string|null, causeId: int|string|null, ...},
+ *     distributor: array{id: int, name: string},
+ *     distribution: array{id: int, periodEnd: string},
+ *     metricType: string,
+ *     distributorMetricTypeId: int,
+ *     opportunityId: int|null,
+ *     points: int|null,
+ *     sale: array<string, mixed>|null,
+ *     ...
+ * }
+ * @phpstan-type AppCollaboratorGroupStructureAnswer array{outcome: 'structure', shape: 'chain', order: list<int>}|array{outcome: 'structure', shape: 'tree', parents: array<int|string, int|null>}
  */
 final class AppFeatureKind
 {
@@ -124,9 +148,25 @@ final class AppFeatureKind
      */
     public const METRIC_FILTER = AppItemKind::METRIC_FILTER;
 
+    /**
+     * An ask for a collaborator group's shape among the members in the
+     * question, once per cascade trigger on the group, for a program (an
+     * engagement cascade) or a distributor (a metric cascade). The question
+     * is an `AppCollaboratorGroupStructureQuestion`. It also carries the
+     * fields of the trigger it interrupts: a distributor's ask carries a
+     * metric calculation's fields, typed as
+     * `AppCollaboratorGroupStructureDistributorQuestion`, and a program's the
+     * program and its engagement trigger's. The answer is an
+     * `AppCollaboratorGroupStructureAnswer`: a chain with every member's
+     * collaborator id once in `order`, top first, or a tree with every
+     * member's id once as a key of `parents`, each mapped to another member's
+     * id or null for a top member, with no cycle.
+     */
+    public const COLLABORATOR_GROUP_STRUCTURE = AppItemKind::COLLABORATOR_GROUP_STRUCTURE;
+
     /** The kinds Siren tells, which wait for no answer. */
     public const TELLS = [self::POST_CONVERSION_ACTION, self::POST_ALLOCATION_ACTION];
 
     /** The kinds Siren asks, which wait for an answer. */
-    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER];
+    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER, self::COLLABORATOR_GROUP_STRUCTURE];
 }

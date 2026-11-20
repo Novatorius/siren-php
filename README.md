@@ -390,8 +390,8 @@ is not a number, and a pool with no whole `value` or no currency.
 `AppFeatureKind` names the kinds Siren sends requests for, with the same
 names and values as `AppItemKind`, and sorts them into `TELLS` and `ASKS`. It
 holds the shape of each kind's question and answer as PHPStan types, such as
-`AppDistributionQuestion`, `AppRewardAnswer` and `AppMetricFilterAnswer`, for
-`@phpstan-import-type`.
+`AppDistributionQuestion`, `AppRewardAnswer`, `AppMetricFilterAnswer` and
+`AppCollaboratorGroupStructureAnswer`, for `@phpstan-import-type`.
 
 #### What the handler replies
 
@@ -553,6 +553,37 @@ most. Then Siren stops waiting: a sale's collaborators get no reward, and a
 refund cuts the rewards already made by the share refunded. An answer after
 that throws `ConflictException` with code `app_request_dropped`.
 
+A collaborator group structure (`AppItemKind::COLLABORATOR_GROUP_STRUCTURE`)
+gives a collaborator group's shape. Siren asks it once per cascade trigger on
+a group that picks it, for a program (an engagement cascade) or a distributor
+(a metric cascade). Its question names the `group`, its `members` with each
+one's `collaboratorId`, `name` and `metadata`, what the cascade is `for`, the
+`triggeringCollaborator` and the `cause`, whose `id` is the trigger's own
+random id of 16 hex characters. It also carries the fields of the trigger it
+interrupts, so a distributor's ask carries a metric calculation's fields:
+
+```json
+{"group": {"id": 4, "name": "Northeast team"},
+ "members": [{"collaboratorId": 42, "name": "Riley Rep", "metadata": {"rank": 3}},
+             {"collaboratorId": 57, "name": "Sam Lead", "metadata": {"rank": 2}},
+             {"collaboratorId": 63, "name": "Jo Manager", "metadata": {"rank": 1}}],
+ "for": {"type": "distributor", "id": 2},
+ "triggeringCollaborator": {"id": 42, "name": "Riley Rep"},
+ "cause": {"id": "9f2c4e1a7b3d5c60", "type": null, "causeId": null},
+ "distributor": {"id": 2, "name": "Partner leaderboard"},
+ "distribution": {"id": 21, "periodEnd": "2026-12-01T00:00:00+00:00"},
+ "metricType": "referredSiteVisit", "distributorMetricTypeId": 55,
+ "opportunityId": 615, "points": null, "sale": null}
+```
+
+The answer is a chain or a tree. A chain's `order` lists every member's
+`collaboratorId` once, top of the chain first, and Siren reads it as its
+built-in linear chain. A tree's `parents` holds every member's
+`collaboratorId` as text once, each mapped to another member's id or to null
+for a top member, with no cycle, and Siren reads it as its parent and child
+structure. Siren refuses an answer that breaks these rules with 422
+`app_answer_invalid`.
+
 ```php
 use Siren\Sdk\AppItemKind;
 
@@ -579,6 +610,12 @@ if ($request->isAsk() && $request->item['kind'] === AppItemKind::INCENTIVE_RESOL
         $rewards[(string) $conversion['conversionId']] = $total > 0 ? intdiv($pool['value'] * $conversion['score'], $total) : null;
     }
     $siren->apps->requests->answer($request->id, ['outcome' => 'rewards', 'units' => $pool['units'], 'rewards' => $rewards]);
+}
+
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::COLLABORATOR_GROUP_STRUCTURE) {
+    $chain = ['outcome' => 'structure', 'shape' => 'chain', 'order' => [63, 57, 42]];
+    $tree = ['outcome' => 'structure', 'shape' => 'tree', 'parents' => ['42' => 57, '57' => 63, '63' => null]];
+    $siren->apps->requests->answer($request->id, $useTree ? $tree : $chain);
 }
 ```
 
