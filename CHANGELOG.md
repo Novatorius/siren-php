@@ -41,9 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the app split each sale's reward. The README shows the answer each of the
   three takes, and the 409 `app_request_dropped` Siren answers once it stopped
   waiting, 24 hours after the first ask about a sale.
-- `AppFeatureKind` holds the payout method ask's question and answer as the PHPStan types
-  `AppPayoutQuestion` and `AppPayoutAnswer`. The README shows how to answer a payout ask and says the
-  app pays each payout id at most once.
 - `$siren->apps->verifyRequest($rawBody, $headers, $secret, $toleranceSeconds,
   $now)` checks a request Siren signed and sent an app and returns an
   `AppRequest`. It checks `X-Siren-Event`, the `X-Siren-Signature-V2`

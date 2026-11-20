@@ -47,7 +47,7 @@ namespace Siren\Sdk;
  * @phpstan-type AppPayoutQuestion array{
  *     payout: array{id: int, fulfillmentId: int, attempt: int},
  *     amount: array{value: int, units: string, currency: AppCurrency},
- *     collaborator: array{id: int, name: string, email: string},
+ *     collaborator: array{id: int, name: string, email: string|null},
  * }
  * @phpstan-type AppPayoutAnswer array{outcome: 'paid', reference: string}|array{outcome: 'failed', reason: string}
  * @phpstan-type AppMetricCalculationQuestion array{
