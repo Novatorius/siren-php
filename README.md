@@ -356,6 +356,39 @@ over 16384 bytes as JSON. A different second answer throws
 answer stands. When Siren takes no answer from the key,
 `AuthenticationException` carries `ErrorCode::APP_ANSWER_UNAUTHORIZED`.
 
+`AppItemKind` names each kind as `$request->item['kind']` carries it. The SDK
+checks only what every answer needs, so Siren checks the rest of each kind's
+answer and refuses one that doesn't fit with 422. An incentive resolver
+(`AppItemKind::INCENTIVE_RESOLVER`) splits a program's reward among the
+collaborators a sale, renewal or lead converted. Its question holds the
+`program`, the `conversionType`, the `transaction` (null for a lead), the
+reward `pool` as a stored whole number, and the `conversions`, each with its
+engagement `score`. `reason` is `sale`, or `refund` when a partial refund asks
+again about rewards already made. The answer gives the pool's `units`, and in
+`rewards` every `conversionId` of the question as text, each a whole number of
+0 or more or null for a collaborator who earns nothing. The rewards may add up
+to more than the pool.
+
+The rewards wait for the answer, 24 hours from the first ask about a sale at
+most. Then Siren stops waiting: a sale's collaborators get no reward, and a
+refund cuts the rewards already made by the share refunded. An answer after
+that throws `ConflictException` with code `app_request_dropped`.
+
+```php
+use Siren\Sdk\AppItemKind;
+
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::INCENTIVE_RESOLVER) {
+    $pool = $request->data['pool'];
+    $conversions = $request->data['conversions'];
+    $total = array_sum(array_column($conversions, 'score'));
+    $rewards = [];
+    foreach ($conversions as $conversion) {
+        $rewards[(string) $conversion['conversionId']] = $total > 0 ? intdiv($pool['value'] * $conversion['score'], $total) : null;
+    }
+    $siren->apps->requests->answer($request->id, ['outcome' => 'rewards', 'units' => $pool['units'], 'rewards' => $rewards]);
+}
+```
+
 ### Which credential does each call need?
 
 | Calls | Credential |
