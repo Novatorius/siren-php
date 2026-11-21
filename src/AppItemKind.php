@@ -55,6 +55,16 @@ final class AppItemKind
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
 
     /**
+     * An ask which engagements one sale, lead or renewal converts on a
+     * program and the pool the program's resolver divides, picked on a
+     * program as its incentive type. The app answers
+     * `['outcome' => 'award', 'units' => 'USD', 'pool' => 1500, 'engagementIds' => [880, 881]]`,
+     * or `['outcome' => 'none']` to award nothing. The program's award waits
+     * for the answer, 24 hours from the first ask at most.
+     */
+    public const INCENTIVE_TYPE = 'incentiveType';
+
+    /**
      * An ask who earns an engagement, and its score, picked on a program's
      * engagement type. The app answers
      * `['outcome' => 'engagements', 'results' => [['collaboratorId' => 7, 'score' => 10]]]`.
@@ -73,6 +83,16 @@ final class AppItemKind
      * of 1 to 200 characters, which Siren notes on the opportunity.
      */
     public const ENGAGEMENT_FILTER = 'engagementFilter';
+
+    /**
+     * An ask for the order to try a program group's programs in for one sale
+     * or lead, picked on a program group as its structure. The app answers
+     * `['outcome' => 'sorted', 'programIds' => [9, 12]]`, every program id
+     * of the question exactly once. The first program that converts wins
+     * the group. The group's award waits for the answer, 24 hours from the
+     * sale at most.
+     */
+    public const PROGRAM_GROUP_SORTER = 'programGroupSorter';
 
     private function __construct()
     {
