@@ -27,6 +27,8 @@ final class AppIncentiveResolverTest extends TestCase
             'collaboratorGroupStructure',
             'customEvent',
             'distributionResolver',
+            'engagementCalculation',
+            'engagementFilter',
             'incentiveResolver',
             'metricCalculation',
             'metricFilter',

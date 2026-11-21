@@ -42,7 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole steps of the pool's currency, rounded down so the sum never passes
   `pool.value`, and evenly when every weight is 0. It throws
   `InvalidArgumentException` for a negative, non-finite or non-number weight.
-- `AppFeatureKind` names the seven kinds Siren sends requests for, with the
+- `AppItemKind::ENGAGEMENT_CALCULATION` and `AppFeatureKind::ENGAGEMENT_CALCULATION`
+  (`engagementCalculation`), and `AppItemKind::ENGAGEMENT_FILTER` and
+  `AppFeatureKind::ENGAGEMENT_FILTER` (`engagementFilter`), the kinds a
+  program's engagement type and a program pick to let the app decide who
+  earns each engagement and whether it is made. `AppFeatureKind` holds their
+  questions and answers as the PHPStan types `AppEngagementCalculationQuestion`,
+  `AppEngagementCalculationAnswer`, `AppEngagementFilterQuestion` and
+  `AppEngagementFilterAnswer`, and the README shows the answer each takes.
+- `AppFeatureKind` names the nine kinds Siren sends requests for, with the
   same values as `AppItemKind`, and holds each kind's question and answer as
   PHPStan types.
 - `AppItemKind` names the kinds of feature an app can add, as an app

@@ -67,6 +67,25 @@ namespace Siren\Sdk;
  *     sale: array<string, mixed>|null,
  * }
  * @phpstan-type AppMetricFilterAnswer array{outcome: 'allow'}|array{outcome: 'suppress', reason: string}
+ * @phpstan-type AppEngagementCause array{id: string, event: string, occurredAt: string}
+ * @phpstan-type AppEngagementCalculationQuestion array{
+ *     program: array{id: int, name: string},
+ *     engagementType: string,
+ *     programEngagementTypeId: int,
+ *     args: array<string, string>,
+ *     opportunity: array{id: int, customerId: int|null},
+ *     triggeringCollaborator: array{id: int, name: string},
+ *     cause: AppEngagementCause,
+ * }
+ * @phpstan-type AppEngagementCalculationAnswer array{outcome: 'engagements', results: list<array{collaboratorId: int, score: int}>}
+ * @phpstan-type AppEngagementFilterQuestion array{
+ *     program: array{id: int, name: string},
+ *     collaborator: array{id: int, name: string},
+ *     opportunity: array{id: int, customerId: int|null},
+ *     engagementType: string,
+ *     cause: AppEngagementCause,
+ * }
+ * @phpstan-type AppEngagementFilterAnswer array{outcome: 'allow'}|array{outcome: 'suppress', reason: string}
  * @phpstan-type AppCollaboratorGroupStructureQuestion array{
  *     group: array{id: int, name: string},
  *     members: list<array{collaboratorId: int, name: string, metadata: array<string, mixed>}>,
@@ -149,6 +168,21 @@ final class AppFeatureKind
     public const METRIC_FILTER = AppItemKind::METRIC_FILTER;
 
     /**
+     * An ask who earns an engagement, and its score, picked on a program's
+     * engagement type. The question is an `AppEngagementCalculationQuestion`
+     * and the answer an `AppEngagementCalculationAnswer`.
+     */
+    public const ENGAGEMENT_CALCULATION = AppItemKind::ENGAGEMENT_CALCULATION;
+
+    /**
+     * An ask whether an engagement may be made, picked on a program. The
+     * question is an `AppEngagementFilterQuestion`, which names the
+     * collaborator the engagement would credit, and the answer an
+     * `AppEngagementFilterAnswer`.
+     */
+    public const ENGAGEMENT_FILTER = AppItemKind::ENGAGEMENT_FILTER;
+
+    /**
      * An ask for a collaborator group's shape among the members in the
      * question, once per cascade trigger on the group, for a program (an
      * engagement cascade) or a distributor (a metric cascade). The question
@@ -168,5 +202,5 @@ final class AppFeatureKind
     public const TELLS = [self::POST_CONVERSION_ACTION, self::POST_ALLOCATION_ACTION];
 
     /** The kinds Siren asks, which wait for an answer. */
-    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER, self::COLLABORATOR_GROUP_STRUCTURE];
+    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER, self::ENGAGEMENT_CALCULATION, self::ENGAGEMENT_FILTER, self::COLLABORATOR_GROUP_STRUCTURE];
 }

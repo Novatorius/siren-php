@@ -553,6 +553,21 @@ most. Then Siren stops waiting: a sale's collaborators get no reward, and a
 refund cuts the rewards already made by the share refunded. An answer after
 that throws `ConflictException` with code `app_request_dropped`.
 
+An engagement calculation (`AppItemKind::ENGAGEMENT_CALCULATION`) is asked
+each time an engagement triggers for a program whose engagement type picks
+it. Its question holds the `program`, the `engagementType`, the `args` a
+person gave that engagement type, the `opportunity` with the `customerId`
+Siren matched it to (or null), the `triggeringCollaborator` and the `cause`,
+whose `occurredAt` dates the engagements the answer makes. It answers who
+earns an engagement and its score, with the same limits as a metric
+calculation. An empty list makes no engagement. An engagement filter
+(`AppItemKind::ENGAGEMENT_FILTER`) answers whether an engagement may be made
+for the `collaborator` it names: allow it, or suppress it with a plain text
+reason of 1 to 200 characters, which Siren notes on the opportunity. Siren
+makes no engagement until the answer, and a sale on that program and
+opportunity waits for it, 24 hours from the first ask at most. Then the
+trigger makes no engagement and the sales award without it.
+
 A collaborator group structure (`AppItemKind::COLLABORATOR_GROUP_STRUCTURE`)
 gives a collaborator group's shape. Siren asks it once per cascade trigger on
 a group that picks it, for a program (an engagement cascade) or a distributor
@@ -610,6 +625,19 @@ if ($request->isAsk() && $request->item['kind'] === AppItemKind::INCENTIVE_RESOL
         $rewards[(string) $conversion['conversionId']] = $total > 0 ? intdiv($pool['value'] * $conversion['score'], $total) : null;
     }
     $siren->apps->requests->answer($request->id, ['outcome' => 'rewards', 'units' => $pool['units'], 'rewards' => $rewards]);
+}
+
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::ENGAGEMENT_CALCULATION) {
+    $siren->apps->requests->answer($request->id, [
+        'outcome' => 'engagements',
+        'results' => [['collaboratorId' => $request->data['triggeringCollaborator']['id'], 'score' => 10]],
+    ]);
+}
+
+if ($request->isAsk() && $request->item['kind'] === AppItemKind::ENGAGEMENT_FILTER) {
+    $siren->apps->requests->answer($request->id, isStaff($request->data['collaborator']['id'])
+        ? ['outcome' => 'suppress', 'reason' => 'The visitor works for the partner.']
+        : ['outcome' => 'allow']);
 }
 
 if ($request->isAsk() && $request->item['kind'] === AppItemKind::COLLABORATOR_GROUP_STRUCTURE) {

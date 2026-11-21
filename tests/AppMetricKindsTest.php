@@ -24,6 +24,8 @@ final class AppMetricKindsTest extends TestCase
             'collaboratorGroupStructure',
             'customEvent',
             'distributionResolver',
+            'engagementCalculation',
+            'engagementFilter',
             'incentiveResolver',
             'metricCalculation',
             'metricFilter',
