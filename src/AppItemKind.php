@@ -71,8 +71,9 @@ final class AppItemKind
      * Siren takes at most 50 results, each collaborator once, each in the
      * organization and not in the trash, and each score a whole number of 0
      * or more. An empty list makes no engagement. Siren makes no engagement
-     * until the answer, at most 24 hours from the trigger, or from the sale that
-     * waits on the answer when that sale came first.
+     * until the answer, at most 24 hours from when Siren asked. When a sale
+     * waits on the answer, the ask ends with that sale's wait, 24 hours after
+     * the sale reached Siren.
      */
     public const ENGAGEMENT_CALCULATION = 'engagementCalculation';
 
