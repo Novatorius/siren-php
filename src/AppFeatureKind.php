@@ -44,6 +44,20 @@ namespace Siren\Sdk;
  *     conversions: list<array{conversionId: int, engagementId: int, collaboratorId: int, collaboratorStatus: string, score: int, engagementCreatedDate: string}>,
  * }
  * @phpstan-type AppRewardAnswer array{outcome: 'rewards', units: string, rewards: array<int|string, int|null>}
+ * @phpstan-type AppIncentiveTypeEngagement array{engagementId: int, collaboratorId: int, score: int|float, createdDate: string}
+ * @phpstan-type AppIncentiveTypeQuestion array{
+ *     reason: 'sale'|'refund',
+ *     program: array{id: int, name: string, units: string},
+ *     conversionType: 'sale'|'lead'|'renewal',
+ *     opportunity: array{id: int},
+ *     transaction: array{id: int, status: string, units: string, currency: AppCurrency|null, total: int, lines: list<array{id: int, type: string, name: string, quantity: int|float, value: int}>}|null,
+ *     binding: array{type: string, id: string}|null,
+ *     engagements: list<AppIncentiveTypeEngagement>,
+ *     conversions?: list<array{conversionId: int, engagementId: int}>
+ * }
+ * @phpstan-type AppIncentiveTypeAwardAnswer array{outcome: 'award', units: string, pool: int, engagementIds: list<int>}
+ * @phpstan-type AppIncentiveTypeNoneAnswer array{outcome: 'none'}
+ * @phpstan-type AppIncentiveTypeAnswer AppIncentiveTypeAwardAnswer|AppIncentiveTypeNoneAnswer
  * @phpstan-type AppMetricCalculationQuestion array{
  *     distributor: array{id: int, name: string},
  *     distribution: array{id: int, periodEnd: string},
@@ -67,6 +81,33 @@ namespace Siren\Sdk;
  *     sale: array<string, mixed>|null,
  * }
  * @phpstan-type AppMetricFilterAnswer array{outcome: 'allow'}|array{outcome: 'suppress', reason: string}
+ * @phpstan-type AppEngagementCause array{id: string, event: string, occurredAt: string}
+ * @phpstan-type AppEngagementCalculationQuestion array{
+ *     program: array{id: int, name: string},
+ *     engagementType: string,
+ *     programEngagementTypeId: int,
+ *     args: array<string, string>,
+ *     opportunity: array{id: int, customerId: int|null},
+ *     triggeringCollaborator: array{id: int, name: string},
+ *     cause: AppEngagementCause,
+ * }
+ * @phpstan-type AppEngagementCalculationAnswer array{outcome: 'engagements', results: list<array{collaboratorId: int, score: int}>}
+ * @phpstan-type AppEngagementFilterQuestion array{
+ *     program: array{id: int, name: string},
+ *     collaborator: array{id: int, name: string},
+ *     opportunity: array{id: int, customerId: int|null},
+ *     engagementType: string,
+ *     cause: AppEngagementCause,
+ * }
+ * @phpstan-type AppEngagementFilterAnswer array{outcome: 'allow'}|array{outcome: 'suppress', reason: string}
+ * @phpstan-type AppGroupOrderQuestion array{
+ *     group: array{id: int, name: string},
+ *     conversionType: string,
+ *     opportunity: array{id: int},
+ *     transaction: array{id: int, units: string, total: int}|null,
+ *     programs: list<array{id: int, name: string, engagements: list<array{engagementId: int, collaboratorId: int, score: int, createdDate: string}>}>,
+ * }
+ * @phpstan-type AppGroupOrderAnswer array{outcome: 'sorted', programIds: list<int>}
  * @phpstan-type AppTransactionLine array{
  *     id: int,
  *     type: 'lineItem'|'discount'|'fee'|'shipping'|'tax',
@@ -120,6 +161,17 @@ final class AppFeatureKind
     public const INCENTIVE_RESOLVER = AppItemKind::INCENTIVE_RESOLVER;
 
     /**
+     * An ask which engagements one sale, lead or renewal converts, picked on
+     * a program as its incentive type. The question is an
+     * `AppIncentiveTypeQuestion`: the program, the transaction (null for a
+     * lead) and the engagements the program holds on the opportunity. The
+     * answer is an `AppIncentiveTypeAnswer`: the program's units, a pool of
+     * 0 or more and the engagements of the question that convert, each once,
+     * or `['outcome' => 'none']`. The program's resolver divides the pool.
+     */
+    public const INCENTIVE_TYPE = AppItemKind::INCENTIVE_TYPE;
+
+    /**
      * An ask to pay a payout, such as `['payoutId' => 88, 'amount' => 2500, 'currency' => 'USD']`.
      * The answer carries a text `outcome`, such as `['outcome' => 'paid', 'reference' => 'TX-1']`.
      */
@@ -141,6 +193,31 @@ final class AppFeatureKind
     public const METRIC_FILTER = AppItemKind::METRIC_FILTER;
 
     /**
+     * An ask who earns an engagement, and its score, picked on a program's
+     * engagement type. The question is an `AppEngagementCalculationQuestion`
+     * and the answer an `AppEngagementCalculationAnswer`.
+     */
+    public const ENGAGEMENT_CALCULATION = AppItemKind::ENGAGEMENT_CALCULATION;
+
+    /**
+     * An ask whether an engagement may be made, picked on a program. The
+     * question is an `AppEngagementFilterQuestion`, which names the
+     * collaborator the engagement would credit, and the answer an
+     * `AppEngagementFilterAnswer`.
+     */
+    public const ENGAGEMENT_FILTER = AppItemKind::ENGAGEMENT_FILTER;
+
+    /**
+     * An ask for the order to try a program group's programs in for one sale
+     * or lead, picked on a program group as its structure. The question is an
+     * `AppGroupOrderQuestion`: the group's programs that take the
+     * conversion, in the group's order, each with its active engagements on
+     * the opportunity. The answer is an `AppGroupOrderAnswer`: every program
+     * id of the question exactly once, in the order Siren tries them.
+     */
+    public const PROGRAM_GROUP_SORTER = AppItemKind::PROGRAM_GROUP_SORTER;
+
+    /**
      * An ask for which of a sale's own lines count, once per sale for each
      * program or distributor that picks the filter. Siren's catalog calls it
      * a transaction compiler. The subject id is
@@ -160,5 +237,5 @@ final class AppFeatureKind
     public const TELLS = [self::POST_CONVERSION_ACTION, self::POST_ALLOCATION_ACTION];
 
     /** The kinds Siren asks, which wait for an answer. */
-    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER, self::TRANSACTION_FILTER];
+    public const ASKS = [self::DISTRIBUTION_RESOLVER, self::INCENTIVE_RESOLVER, self::PAYOUT_METHOD, self::METRIC_CALCULATION, self::METRIC_FILTER, self::INCENTIVE_TYPE, self::ENGAGEMENT_CALCULATION, self::ENGAGEMENT_FILTER, self::PROGRAM_GROUP_SORTER, self::TRANSACTION_FILTER];
 }

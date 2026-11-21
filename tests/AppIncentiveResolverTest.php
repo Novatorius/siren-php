@@ -26,12 +26,16 @@ final class AppIncentiveResolverTest extends TestCase
         $this->assertSame([
             'customEvent',
             'distributionResolver',
+            'engagementCalculation',
+            'engagementFilter',
             'incentiveResolver',
+            'incentiveType',
             'metricCalculation',
             'metricFilter',
             'payoutMethod',
             'postAllocationAction',
             'postConversionAction',
+            'programGroupSorter',
             'transactionFilter',
         ], $values);
         $this->assertSame('incentiveResolver', AppItemKind::INCENTIVE_RESOLVER);

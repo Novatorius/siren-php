@@ -23,12 +23,16 @@ final class AppMetricKindsTest extends TestCase
         $this->assertSame([
             'customEvent',
             'distributionResolver',
+            'engagementCalculation',
+            'engagementFilter',
             'incentiveResolver',
+            'incentiveType',
             'metricCalculation',
             'metricFilter',
             'payoutMethod',
             'postAllocationAction',
             'postConversionAction',
+            'programGroupSorter',
             'transactionFilter',
         ], $values);
         $this->assertSame('metricCalculation', AppItemKind::METRIC_CALCULATION);

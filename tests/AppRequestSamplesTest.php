@@ -74,6 +74,29 @@ PHP;
     ])
 PHP;
 
+    /** The incentive type's sample, the feature page's PHP tab. */
+    private const PAY_ON_CLOSED_DEALS = <<<'PHP'
+    ->on('incentiveType', 'pay-on-closed-deals', function ($request) {
+        // A tenth of the sale, shared by every engagement. A lead earns nothing here.
+        $sale = $request->data['transaction'];
+        if (!$sale || $sale['units'] !== $request->data['program']['units']) {
+            return ['outcome' => 'none'];
+        }
+        return ['outcome' => 'award', 'units' => $sale['units'], 'pool' => intdiv($sale['total'], 10), 'engagementIds' => array_column($request->data['engagements'], 'engagementId')];
+    })
+PHP;
+
+    /** The program group structure's sample, the feature page's PHP tab. */
+    private const PICK_THE_PROGRAM = <<<'PHP'
+    ->on('programGroupSorter', 'pick-the-program', function ($request) {
+        // Try the program whose best engagement scores highest first.
+        $best = fn ($program) => max([0, ...array_column($program['engagements'], 'score')]);
+        $programs = $request->data['programs'];
+        usort($programs, fn ($a, $b) => $best($b) <=> $best($a));
+        return ['outcome' => 'sorted', 'programIds' => array_column($programs, 'id')];
+    })
+PHP;
+
     /** The stubs for the sample's own helpers, prepended to every request. */
     private const PRELUDE = <<<'PHP'
 <?php
@@ -143,6 +166,8 @@ PHP;
             'note-the-share' => self::sample(self::readme('answer-allocation')),
             'split-by-score' => self::sample(self::readme('answer-distribution')),
             'split-the-reward' => self::sample(self::readme('answer-incentive')),
+            'pay-on-closed-deals' => self::sample(self::readme('answer-award')),
+            'pick-the-program' => self::sample(self::readme('answer-group-order')),
             'psr15' => self::PSR15,
         ];
 
@@ -306,6 +331,8 @@ PHP;
         return [
             'distribution resolver, section 5.3' => ['split-by-score', 'distributionResolver'],
             'incentive resolver, section 5.4' => ['split-the-reward', 'incentiveResolver'],
+            'incentive type' => ['pay-on-closed-deals', 'incentiveType'],
+            'program group structure' => ['pick-the-program', 'programGroupSorter'],
             'the distribution resolver mounted as PSR-15' => ['psr15', 'distributionResolver'],
         ];
     }
@@ -335,6 +362,8 @@ PHP;
             'answer-allocation' => self::NOTE_THE_SHARE,
             'answer-distribution' => self::SPLIT_BY_SCORE,
             'answer-incentive' => self::SPLIT_THE_REWARD,
+            'answer-award' => self::PAY_ON_CLOSED_DEALS,
+            'answer-group-order' => self::PICK_THE_PROGRAM,
         ];
         $at = [];
 
