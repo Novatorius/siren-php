@@ -48,7 +48,7 @@ final class AppRequests
      * and changes nothing. A different second answer is refused with 409
      * `app_request_already_answered`, as a {@see \Siren\Sdk\Exception\ConflictException}.
      * An answer after Siren stopped waiting for the ask, such as an incentive
-     * resolver's 24 hours after the first ask about a sale, is refused with
+     * resolver's 24 hours after its sale's reward began to wait, is refused with
      * 409 `app_request_dropped`, also a `ConflictException`.
      * An answer that doesn't fit the feature's kind is refused with 422.
      *

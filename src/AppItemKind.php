@@ -49,7 +49,8 @@ final class AppItemKind
      * `['outcome' => 'rewards', 'units' => 'USD', 'rewards' => ['1042' => 900, '1043' => null]]`,
      * with the pool's units and every conversion id of the question, each a
      * whole number of 0 or more and no more than the pool, or null. The
-     * rewards wait for the answer, 24 hours from the first ask at most.
+     * rewards wait for the answer, at most 24 hours from when the sale's reward
+     * began to wait.
      */
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
 
@@ -60,7 +61,8 @@ final class AppItemKind
      * Siren takes at most 50 results, each collaborator once, each in the
      * organization and not in the trash, and each score a whole number of 0
      * or more. An empty list makes no engagement. Siren makes no engagement
-     * until the answer, 24 hours from the first ask at most.
+     * until the answer, at most 24 hours from the trigger, or from the sale that
+     * waits on the answer when that sale came first.
      */
     public const ENGAGEMENT_CALCULATION = 'engagementCalculation';
 
