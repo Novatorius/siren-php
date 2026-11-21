@@ -378,6 +378,21 @@ An incentive resolver, also an ask:
     ])
 ```
 
+An incentive type, which chooses the engagements that convert and the pool the
+program's resolver divides, or answers `none`:
+
+<!-- readme-test: answer-award -->
+```php
+    ->on('incentiveType', 'pay-on-closed-deals', function ($request) {
+        // A tenth of the sale, shared by every engagement. A lead earns nothing here.
+        $sale = $request->data['transaction'];
+        if (!$sale || $sale['units'] !== $request->data['program']['units']) {
+            return ['outcome' => 'none'];
+        }
+        return ['outcome' => 'award', 'units' => $sale['units'], 'pool' => intdiv($sale['total'], 10), 'engagementIds' => array_column($request->data['engagements'], 'engagementId')];
+    })
+```
+
 A program group structure, which answers every program of the group once, in
 the order Siren tries them:
 
@@ -561,6 +576,19 @@ again about rewards already made. The answer gives the pool's `units`, and in
 `rewards` every `conversionId` of the question as text, each a whole number of
 0 or more or null for a collaborator who earns nothing. The rewards may add up
 to more than the pool.
+
+An incentive type (`AppItemKind::INCENTIVE_TYPE`) decides a program's award
+for one sale, lead or renewal, for the conversions its `conversionTypes`
+setting lists. Its question holds the `program` with its `units`, the
+`conversionType`, the `opportunity`, the `transaction` (null for a lead, which
+names its `binding` instead) with its `total` and `lines` as stored whole
+numbers, and the `engagements` the program holds on the opportunity. The answer
+gives the program's `units`, a `pool` of 0 or more and `engagementIds`, the
+question's engagements that convert, each once. The program's resolver divides
+the pool among them. `['outcome' => 'none']` awards nothing. A partial refund
+of an award already made asks again with `reason` `refund` and the award's
+`conversions`, and its answer changes only the pool. The program awards
+nothing until the answer, 24 hours from the first ask at most.
 
 A program group structure (`AppItemKind::PROGRAM_GROUP_SORTER`) orders a
 program group's programs for one sale or lead. Its question holds the `group`,

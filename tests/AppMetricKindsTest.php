@@ -26,6 +26,7 @@ final class AppMetricKindsTest extends TestCase
             'engagementCalculation',
             'engagementFilter',
             'incentiveResolver',
+            'incentiveType',
             'metricCalculation',
             'metricFilter',
             'payoutMethod',

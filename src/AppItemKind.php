@@ -54,6 +54,16 @@ final class AppItemKind
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
 
     /**
+     * An ask which engagements one sale, lead or renewal converts on a
+     * program and the pool the program's resolver divides, picked on a
+     * program as its incentive type. The app answers
+     * `['outcome' => 'award', 'units' => 'USD', 'pool' => 1500, 'engagementIds' => [880, 881]]`,
+     * or `['outcome' => 'none']` to award nothing. The program's award waits
+     * for the answer, 24 hours from the first ask at most.
+     */
+    public const INCENTIVE_TYPE = 'incentiveType';
+
+    /**
      * An ask who earns an engagement, and its score, picked on a program's
      * engagement type. The app answers
      * `['outcome' => 'engagements', 'results' => [['collaboratorId' => 7, 'score' => 10]]]`.

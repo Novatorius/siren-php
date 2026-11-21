@@ -29,6 +29,7 @@ final class AppIncentiveResolverTest extends TestCase
             'engagementCalculation',
             'engagementFilter',
             'incentiveResolver',
+            'incentiveType',
             'metricCalculation',
             'metricFilter',
             'payoutMethod',
