@@ -63,6 +63,25 @@ final class AppItemKind
      */
     public const INCENTIVE_TYPE = 'incentiveType';
 
+    /**
+     * An ask who earns an engagement, and its score, picked on a program's
+     * engagement type. The app answers
+     * `['outcome' => 'engagements', 'results' => [['collaboratorId' => 7, 'score' => 10]]]`.
+     * Siren takes at most 50 results, each collaborator once, each in the
+     * organization and not in the trash, and each score a whole number of 0
+     * or more. An empty list makes no engagement. Siren makes no engagement
+     * until the answer, 24 hours from the first ask at most.
+     */
+    public const ENGAGEMENT_CALCULATION = 'engagementCalculation';
+
+    /**
+     * An ask whether an engagement may be made for one collaborator, picked
+     * on a program. The app answers `['outcome' => 'allow']`, or
+     * `['outcome' => 'suppress', 'reason' => '...']` with a plain text reason
+     * of 1 to 200 characters, which Siren notes on the opportunity.
+     */
+    public const ENGAGEMENT_FILTER = 'engagementFilter';
+
     private function __construct()
     {
     }
