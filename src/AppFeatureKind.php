@@ -156,7 +156,7 @@ final class AppFeatureKind
      * `pool.value`, or null for a conversion the app did not choose. The
      * rewards may add up to more than the pool.
      * {@see Resources\Apps::splitPool()} gives such rewards. The rewards wait
-     * for the answer, 24 hours from the first ask at most.
+     * for the answer, at most 24 hours from when the sale's reward began to wait.
      */
     public const INCENTIVE_RESOLVER = AppItemKind::INCENTIVE_RESOLVER;
 
