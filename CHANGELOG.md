@@ -27,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   types `AppCollaboratorGroupStructureQuestion`,
   `AppCollaboratorGroupStructureDistributorQuestion`,
   `AppCollaboratorGroupStructureProgramQuestion` and
-  `AppCollaboratorGroupStructureAnswer`, a chain or a tree. Siren refuses an
-  answer that leaves out or repeats a member, names one outside the group, or
+  `AppCollaboratorGroupStructureAnswer`, a chain or a tree. Each member
+  carries its `status` at the trigger, which Siren credits it by. Siren
+  refuses an answer that leaves out or repeats a member, names one outside the group, or
   makes a cycle with 422 `app_answer_invalid`. The README shows the question
   and both answers.
 - `$siren->apps->requestHandler($signingSecret, $options)` answers Siren's

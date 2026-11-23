@@ -126,7 +126,7 @@ namespace Siren\Sdk;
  * @phpstan-type AppTransactionFilterAnswer array{outcome: 'filtered', include: list<int>}
  * @phpstan-type AppCollaboratorGroupStructureQuestion array{
  *     group: array{id: int, name: string},
- *     members: list<array{collaboratorId: int, name: string, metadata: array<string, mixed>}>,
+ *     members: list<array{collaboratorId: int, name: string, status: string, metadata: array<string, mixed>}>,
  *     for: array{type: 'program'|'distributor', id: int},
  *     triggeringCollaborator: array{id: int, name: string},
  *     cause: array{id: string, ...},
@@ -134,7 +134,7 @@ namespace Siren\Sdk;
  * }
  * @phpstan-type AppCollaboratorGroupStructureDistributorQuestion array{
  *     group: array{id: int, name: string},
- *     members: list<array{collaboratorId: int, name: string, metadata: array<string, mixed>}>,
+ *     members: list<array{collaboratorId: int, name: string, status: string, metadata: array<string, mixed>}>,
  *     for: array{type: 'distributor', id: int},
  *     triggeringCollaborator: array{id: int, name: string},
  *     cause: array{id: string, type: string|null, causeId: int|string|null, ...},
@@ -149,7 +149,7 @@ namespace Siren\Sdk;
  * }
  * @phpstan-type AppCollaboratorGroupStructureProgramQuestion array{
  *     group: array{id: int, name: string},
- *     members: list<array{collaboratorId: int, name: string, metadata: array<string, mixed>}>,
+ *     members: list<array{collaboratorId: int, name: string, status: string, metadata: array<string, mixed>}>,
  *     for: array{type: 'program', id: int},
  *     triggeringCollaborator: array{id: int, name: string},
  *     cause: AppEngagementCause,

@@ -33,9 +33,9 @@ final class AppCollaboratorGroupStructureTest extends TestCase
         return [
             'group' => ['id' => 4, 'name' => 'Northeast team'],
             'members' => [
-                ['collaboratorId' => 42, 'name' => 'Riley Rep', 'metadata' => ['rank' => 3]],
-                ['collaboratorId' => 57, 'name' => 'Sam Lead', 'metadata' => ['rank' => 2]],
-                ['collaboratorId' => 63, 'name' => 'Jo Manager', 'metadata' => ['rank' => 1]],
+                ['collaboratorId' => 42, 'name' => 'Riley Rep', 'status' => 'active', 'metadata' => ['rank' => 3]],
+                ['collaboratorId' => 57, 'name' => 'Sam Lead', 'status' => 'active', 'metadata' => ['rank' => 2]],
+                ['collaboratorId' => 63, 'name' => 'Jo Manager', 'status' => 'active', 'metadata' => ['rank' => 1]],
             ],
             'for' => ['type' => 'distributor', 'id' => 2],
             'triggeringCollaborator' => ['id' => 42, 'name' => 'Riley Rep'],
@@ -113,6 +113,7 @@ final class AppCollaboratorGroupStructureTest extends TestCase
 
         $this->assertStringContainsString('@phpstan-type AppCollaboratorGroupStructureDistributorQuestion', $source);
         $this->assertStringContainsString('@phpstan-type AppCollaboratorGroupStructureProgramQuestion', $source);
+        $this->assertSame(3, substr_count($source, 'members: list<array{collaboratorId: int, name: string, status: string, metadata: array<string, mixed>}>'), 'Each structure question types a member\'s status at the trigger.');
         $this->assertSame(
             ['group', 'members', 'for', 'triggeringCollaborator', 'cause', 'program', 'engagementType', 'programEngagementTypeId', 'args', 'opportunity'],
             array_keys(self::programQuestion()),
