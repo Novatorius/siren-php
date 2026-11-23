@@ -575,7 +575,10 @@ a group that picks it, for a program (an engagement cascade) or a distributor
 one's `collaboratorId`, `name` and `metadata`, what the cascade is `for`, the
 `triggeringCollaborator` and the `cause`, whose `id` is the trigger's own
 random id of 16 hex characters. It also carries the fields of the trigger it
-interrupts, so a distributor's ask carries a metric calculation's fields:
+interrupts. A program's ask carries an engagement calculation's fields (`program`,
+`engagementType`, `programEngagementTypeId`, `args` and `opportunity`) and an engagement's
+`cause`, which the PHPStan type `AppCollaboratorGroupStructureProgramQuestion` describes. A
+distributor's ask carries a metric calculation's fields:
 
 ```json
 {"group": {"id": 4, "name": "Northeast team"},

@@ -109,6 +109,19 @@ namespace Siren\Sdk;
  *     sale: array<string, mixed>|null,
  *     ...
  * }
+ * @phpstan-type AppCollaboratorGroupStructureProgramQuestion array{
+ *     group: array{id: int, name: string},
+ *     members: list<array{collaboratorId: int, name: string, metadata: array<string, mixed>}>,
+ *     for: array{type: 'program', id: int},
+ *     triggeringCollaborator: array{id: int, name: string},
+ *     cause: AppEngagementCause,
+ *     program: array{id: int, name: string},
+ *     engagementType: string,
+ *     programEngagementTypeId: int,
+ *     args: array<string, string>,
+ *     opportunity: array{id: int, customerId: int|null},
+ *     ...
+ * }
  * @phpstan-type AppCollaboratorGroupStructureAnswer array{outcome: 'structure', shape: 'chain', order: list<int>}|array{outcome: 'structure', shape: 'tree', parents: array<int|string, int|null>}
  */
 final class AppFeatureKind
@@ -189,8 +202,9 @@ final class AppFeatureKind
      * is an `AppCollaboratorGroupStructureQuestion`. It also carries the
      * fields of the trigger it interrupts: a distributor's ask carries a
      * metric calculation's fields, typed as
-     * `AppCollaboratorGroupStructureDistributorQuestion`, and a program's the
-     * program and its engagement trigger's. The answer is an
+     * `AppCollaboratorGroupStructureDistributorQuestion`, and a program's an
+     * engagement calculation's fields, typed as
+     * `AppCollaboratorGroupStructureProgramQuestion`. The answer is an
      * `AppCollaboratorGroupStructureAnswer`: a chain with every member's
      * collaborator id once in `order`, top first, or a tree with every
      * member's id once as a key of `parents`, each mapped to another member's

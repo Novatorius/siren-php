@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shape. Siren asks it once per cascade trigger on the group, for a program or
   a distributor. `AppFeatureKind` lists it in `ASKS` and holds the PHPStan
   types `AppCollaboratorGroupStructureQuestion`,
-  `AppCollaboratorGroupStructureDistributorQuestion` and
+  `AppCollaboratorGroupStructureDistributorQuestion`,
+  `AppCollaboratorGroupStructureProgramQuestion` and
   `AppCollaboratorGroupStructureAnswer`, a chain or a tree. Siren refuses an
   answer that leaves out or repeats a member, names one outside the group, or
   makes a cycle with 422 `app_answer_invalid`. The README shows the question

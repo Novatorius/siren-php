@@ -16,6 +16,8 @@ use Siren\Sdk\AppRequest;
  * envelope of Siren's own distribution resolver request
  * (tests/Fixtures/apps-feature-contracts/requests.json), signed now with the
  * secret of tests/Fixtures/apps-exchange.
+ *
+ * @phpstan-import-type AppCollaboratorGroupStructureProgramQuestion from AppFeatureKind
  */
 final class AppCollaboratorGroupStructureTest extends TestCase
 {
@@ -48,6 +50,23 @@ final class AppCollaboratorGroupStructureTest extends TestCase
         ];
     }
 
+    /** @return AppCollaboratorGroupStructureProgramQuestion */
+    private static function programQuestion(): array
+    {
+        return [
+            'group' => ['id' => 4, 'name' => 'Northeast team'],
+            'members' => self::question()['members'],
+            'for' => ['type' => 'program', 'id' => 3],
+            'triggeringCollaborator' => ['id' => 42, 'name' => 'Riley Rep'],
+            'cause' => ['id' => '9f2c4e1a7b3d5c60', 'event' => 'referredSiteVisit', 'occurredAt' => '2026-11-17T12:20:00+00:00'],
+            'program' => ['id' => 3, 'name' => 'Partner program'],
+            'engagementType' => 'referredSiteVisit',
+            'programEngagementTypeId' => 55,
+            'args' => ['pointsAtLayer1' => '10'],
+            'opportunity' => ['id' => 615, 'customerId' => null],
+        ];
+    }
+
     private static function secret(): string
     {
         $fixture = json_decode((string) file_get_contents(__DIR__ . '/Fixtures/apps-exchange/signed-request.json'), true, 512, JSON_THROW_ON_ERROR);
@@ -56,12 +75,13 @@ final class AppCollaboratorGroupStructureTest extends TestCase
     }
 
     /** Siren's request envelope with this kind's item and the slice's question, as JSON. */
-    private static function body(string $key): string
+    /** @param array<string, mixed>|null $question */
+    private static function body(string $key, ?array $question = null): string
     {
         $contracts = json_decode((string) file_get_contents(__DIR__ . '/Fixtures/apps-feature-contracts/requests.json'), true, 512, JSON_THROW_ON_ERROR);
         $request = $contracts['kinds']['distributionResolver']['request'];
         $request['item'] = ['kind' => 'collaboratorGroupStructure', 'key' => $key, 'id' => 'app:11'];
-        $request['data'] = self::question();
+        $request['data'] = $question ?? self::question();
 
         return json_encode($request, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
@@ -85,6 +105,18 @@ final class AppCollaboratorGroupStructureTest extends TestCase
         $this->assertSame(AppItemKind::COLLABORATOR_GROUP_STRUCTURE, AppFeatureKind::COLLABORATOR_GROUP_STRUCTURE);
         $this->assertContains('collaboratorGroupStructure', (new ReflectionClass(AppItemKind::class))->getConstants());
         $this->assertContains('collaboratorGroupStructure', AppFeatureKind::ASKS);
+    }
+
+    public function testTheFeatureKindTypesAProgramQuestionBesideTheDistributorOne(): void
+    {
+        $source = (string) file_get_contents((string) (new ReflectionClass(AppFeatureKind::class))->getFileName());
+
+        $this->assertStringContainsString('@phpstan-type AppCollaboratorGroupStructureDistributorQuestion', $source);
+        $this->assertStringContainsString('@phpstan-type AppCollaboratorGroupStructureProgramQuestion', $source);
+        $this->assertSame(
+            ['group', 'members', 'for', 'triggeringCollaborator', 'cause', 'program', 'engagementType', 'programEngagementTypeId', 'args', 'opportunity'],
+            array_keys(self::programQuestion()),
+        );
     }
 
     public function testTheHandlerPostsAChainAndATreeAsTheFunctionsReturnThem(): void
@@ -114,8 +146,8 @@ final class AppCollaboratorGroupStructureTest extends TestCase
         });
 
         $sent = [];
-        foreach (['by-rank', 'by-lead'] as $key) {
-            $body = self::body($key);
+        foreach (['by-rank' => null, 'by-lead' => self::programQuestion()] as $key => $question) {
+            $body = self::body($key, $question);
             $reply = $handler->answer('POST', $body, self::signed($body));
             $this->assertSame(200, $reply->status, $reply->body);
             $this->assertNotNull($reply->after);
