@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `AppItemKind::TRANSACTION_FILTER` and `AppFeatureKind::TRANSACTION_FILTER`
+  (`transactionFilter`), the feature kind a program or a distributor picks to
+  let the app say which of a sale's own lines count. Siren's catalog calls it
+  a transaction compiler. Siren asks it once per sale for each program or
+  distributor that picks it, and a refund reuses the stored answer.
+  `AppFeatureKind` lists it in `ASKS` and holds the PHPStan types
+  `AppTransactionFilterQuestion`, `AppTransactionLine` and
+  `AppTransactionFilterAnswer`, the ids of the lines to include. Siren refuses
+  a line id the question lacks with 422 `app_answer_invalid`. The README shows
+  the question and a handler that counts only `lineItem` lines.
 - `AppItemKind::COLLABORATOR_GROUP_STRUCTURE` and
   `AppFeatureKind::COLLABORATOR_GROUP_STRUCTURE` (`collaboratorGroupStructure`),
   the feature kind a collaborator group picks to let the app give the group's
@@ -43,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole steps of the pool's currency, rounded down so the sum never passes
   `pool.value`, and evenly when every weight is 0. It throws
   `InvalidArgumentException` for a negative, non-finite or non-number weight.
+- `AppItemKind::INCENTIVE_TYPE` and `AppFeatureKind::INCENTIVE_TYPE`
+  (`incentiveType`), the kind a program picks as its incentive type to let the
+  app decide which engagements each sale, lead or renewal converts and the
+  pool the program's resolver divides. `AppFeatureKind` holds its question and
+  answer as the PHPStan types `AppIncentiveTypeQuestion` and
+  `AppIncentiveTypeAnswer`, `['outcome' => 'award', 'units' => ..., 'pool' =>
+  ..., 'engagementIds' => [...]]` or `['outcome' => 'none']`, and the README
+  shows the handler's sample for it.
 - `AppItemKind::ENGAGEMENT_CALCULATION` and `AppFeatureKind::ENGAGEMENT_CALCULATION`
   (`engagementCalculation`), and `AppItemKind::ENGAGEMENT_FILTER` and
   `AppFeatureKind::ENGAGEMENT_FILTER` (`engagementFilter`), the kinds a
@@ -51,7 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   questions and answers as the PHPStan types `AppEngagementCalculationQuestion`,
   `AppEngagementCalculationAnswer`, `AppEngagementFilterQuestion` and
   `AppEngagementFilterAnswer`, and the README shows the answer each takes.
-- `AppFeatureKind` names the nine kinds Siren sends requests for, with the
+- `AppItemKind::PROGRAM_GROUP_SORTER` and `AppFeatureKind::PROGRAM_GROUP_SORTER`
+  (`programGroupSorter`), the kind a program group picks as its structure to
+  let the app order its programs for each sale or lead. `AppFeatureKind`
+  holds its question and answer as the PHPStan types `AppGroupOrderQuestion`
+  and `AppGroupOrderAnswer`, `['outcome' => 'sorted', 'programIds' => [...]]`,
+  and the README shows the handler's sample for it.
+- `AppFeatureKind` names the eleven kinds Siren sends requests for, with the
   same values as `AppItemKind`, and holds each kind's question and answer as
   PHPStan types.
 - `AppItemKind` names the kinds of feature an app can add, as an app
@@ -60,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `INCENTIVE_RESOLVER` (`incentiveResolver`), which a program picks to let
   the app split each sale's reward. The README shows the answer each of the
   three takes, and the 409 `app_request_dropped` Siren answers once it stopped
-  waiting, 24 hours after the first ask about a sale.
+  waiting, 24 hours after the sale's reward began to wait.
 - `$siren->apps->verifyRequest($rawBody, $headers, $secret, $toleranceSeconds,
   $now)` checks a request Siren signed and sent an app and returns an
   `AppRequest`. It checks `X-Siren-Event`, the `X-Siren-Signature-V2`

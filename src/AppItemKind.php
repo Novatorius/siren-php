@@ -49,9 +49,20 @@ final class AppItemKind
      * `['outcome' => 'rewards', 'units' => 'USD', 'rewards' => ['1042' => 900, '1043' => null]]`,
      * with the pool's units and every conversion id of the question, each a
      * whole number of 0 or more and no more than the pool, or null. The
-     * rewards wait for the answer, 24 hours from the first ask at most.
+     * rewards wait for the answer, at most 24 hours from when the sale's reward
+     * began to wait.
      */
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
+
+    /**
+     * An ask which engagements one sale, lead or renewal converts on a
+     * program and the pool the program's resolver divides, picked on a
+     * program as its incentive type. The app answers
+     * `['outcome' => 'award', 'units' => 'USD', 'pool' => 1500, 'engagementIds' => [880, 881]]`,
+     * or `['outcome' => 'none']` to award nothing. The program's award waits
+     * for the answer, 24 hours from the first ask at most.
+     */
+    public const INCENTIVE_TYPE = 'incentiveType';
 
     /**
      * An ask who earns an engagement, and its score, picked on a program's
@@ -60,7 +71,9 @@ final class AppItemKind
      * Siren takes at most 50 results, each collaborator once, each in the
      * organization and not in the trash, and each score a whole number of 0
      * or more. An empty list makes no engagement. Siren makes no engagement
-     * until the answer, 24 hours from the first ask at most.
+     * until the answer, at most 24 hours from when Siren asked. When a sale
+     * waits on the answer, the ask ends with that sale's wait, 24 hours after
+     * the sale reached Siren.
      */
     public const ENGAGEMENT_CALCULATION = 'engagementCalculation';
 
@@ -71,6 +84,26 @@ final class AppItemKind
      * of 1 to 200 characters, which Siren notes on the opportunity.
      */
     public const ENGAGEMENT_FILTER = 'engagementFilter';
+
+    /**
+     * An ask for the order to try a program group's programs in for one sale
+     * or lead, picked on a program group as its structure. The app answers
+     * `['outcome' => 'sorted', 'programIds' => [9, 12]]`, every program id
+     * of the question exactly once. The first program that converts wins
+     * the group. The group's award waits for the answer, 24 hours from the
+     * sale at most.
+     */
+    public const PROGRAM_GROUP_SORTER = 'programGroupSorter';
+
+    /**
+     * An ask for which of a sale's own lines count, picked on a program or a
+     * distributor. Siren's catalog calls it a transaction compiler. Siren
+     * asks once per sale for each program or distributor that picks it. The
+     * app answers `['outcome' => 'filtered', 'include' => [5501, 5502]]`, the
+     * ids of the question's lines to include, each at most once. An empty
+     * list includes nothing, and Siren refuses an id the question lacks.
+     */
+    public const TRANSACTION_FILTER = 'transactionFilter';
 
     /**
      * An ask for a collaborator group's shape, picked on the group. Siren
