@@ -91,9 +91,72 @@ final class AppRequests
     }
 
     /**
+     * The base address this client sends answers to, with no trailing slash.
+     *
+     * @internal For {@see \Siren\Sdk\AppRequestHandler}, which checks it against a request's `answerUrl`.
+     */
+    public function baseUrl(): string
+    {
+        return $this->transport->baseUrl;
+    }
+
+    /**
+     * Checks an answer as {@see answer()} does before sending, and sends nothing.
+     *
+     * @internal For {@see \Siren\Sdk\AppRequestHandler::simulate()}.
+     *
+     * @param array<int|string, mixed> $answer
+     *
+     * @throws \InvalidArgumentException When the id or the answer can't be sent.
+     */
+    public function check(string $id, array $answer, string $caller = 'The request handler'): void
+    {
+        $this->encode($id, $answer, $caller);
+    }
+
+    /**
      * @param array<int|string, mixed> $answer
      */
     private function send(string $id, array $answer, bool $retryable, string $caller): AppAnswerReceipt
+    {
+        $this->encode($id, $answer, $caller);
+
+        $path = '/apps/requests/' . $id . '/answer';
+
+        try {
+            $response = $this->transport->request('POST', $path, $answer, [], $retryable);
+        } catch (AuthenticationException $e) {
+            if ($e->getStatusCode() === 401 && ($e->getErrorCode() === null || $e->getErrorCode() === '')) {
+                throw new AuthenticationException(self::UNAUTHORIZED_ANSWER, 401, ErrorCode::APP_ANSWER_UNAUTHORIZED, $e->getErrorData(), $e);
+            }
+
+            throw $e;
+        }
+
+        $reply = json_decode($response->getRawBody(), true);
+
+        if (
+            !is_array($reply)
+            || ($reply['status'] ?? null) !== 'accepted'
+            || (array_key_exists('duplicate', $reply) && !is_bool($reply['duplicate']))
+        ) {
+            throw new ApiException(
+                sprintf('Siren answered POST %s with a body that is not an accepted answer.', $path),
+                $response->getStatusCode(),
+                null,
+                is_array($reply) ? $reply : null,
+            );
+        }
+
+        return new AppAnswerReceipt('accepted', ($reply['duplicate'] ?? false) === true);
+    }
+
+    /**
+     * @param array<int|string, mixed> $answer
+     *
+     * @throws \InvalidArgumentException When the id or the answer can't be sent.
+     */
+    private function encode(string $id, array $answer, string $caller): string
     {
         if (preg_match(self::REQUEST_ID_PATTERN, $id) !== 1) {
             throw new \InvalidArgumentException(sprintf(
@@ -128,33 +191,6 @@ final class AppRequests
             ));
         }
 
-        $path = '/apps/requests/' . $id . '/answer';
-
-        try {
-            $response = $this->transport->request('POST', $path, $answer, [], $retryable);
-        } catch (AuthenticationException $e) {
-            if ($e->getStatusCode() === 401 && ($e->getErrorCode() === null || $e->getErrorCode() === '')) {
-                throw new AuthenticationException(self::UNAUTHORIZED_ANSWER, 401, ErrorCode::APP_ANSWER_UNAUTHORIZED, $e->getErrorData(), $e);
-            }
-
-            throw $e;
-        }
-
-        $reply = json_decode($response->getRawBody(), true);
-
-        if (
-            !is_array($reply)
-            || ($reply['status'] ?? null) !== 'accepted'
-            || (array_key_exists('duplicate', $reply) && !is_bool($reply['duplicate']))
-        ) {
-            throw new ApiException(
-                sprintf('Siren answered POST %s with a body that is not an accepted answer.', $path),
-                $response->getStatusCode(),
-                null,
-                is_array($reply) ? $reply : null,
-            );
-        }
-
-        return new AppAnswerReceipt('accepted', ($reply['duplicate'] ?? false) === true);
+        return $json;
     }
 }

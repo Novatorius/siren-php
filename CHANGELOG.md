@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Siren\Sdk\Testing\AppRequests::make($kind, $key, $options)` builds a
+  request as Siren signs it, a `SignedRequest` with `method`, `headers` and
+  `rawBody`, so a handler can be tried without Siren. Its question defaults to
+  `AppRequests::sampleData($kind)`, Siren's own sample for the kind, shipped
+  in the package and held equal to Siren's feature contracts by a test. Its
+  secret defaults to `SIREN_SIGNING_SECRET`.
+- `AppRequestHandler::simulate($request)` runs the whole handler on a
+  `SignedRequest` and returns an `AppRequestSimulation` with the reply and,
+  for an ask, the answer the function gave, checked as the post would check
+  it and never posted. A failure `onError` would hear comes back as `error`.
+- `new Siren()` reads `SIREN_API_KEY` when neither `apiKey` nor `accessToken`
+  is passed, and `apps->requestHandler()` reads `SIREN_SIGNING_SECRET` when no
+  secret is passed. A value passed in code wins. With neither, each still
+  refuses and names both the option and the variable.
+
 - `$siren->events->ingest($slug, $payload)` sends an app's custom event with a
   short-lived token. With a client built from the app's key, the SDK trades
   the key for a 20-minute token at `POST /oauth/token`, gets a new one when
@@ -191,6 +206,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests, from the README's own text, against Siren's own request for its kind
   (tests/Fixtures/apps-feature-contracts/requests.json, now with all
   thirteen kinds Siren sends).
+- The README's tagline names answering Siren from an app, and Install says
+  the apps code is unreleased and shows how to install the `feat/apps` branch
+  from GitHub or a local checkout. A "Try it without Siren" section follows
+  the first sample, and its PHPUnit test runs in the tests. The first sample
+  drops `baseUrl` and reads the key and the secret from the environment. The
+  README says once, under Configuration, that `baseUrl` is only for a local
+  or sandbox Siren. The webhook section says an app's address gets the V2
+  signature, which the request handler checks.
+- The 400 for a signed body that is not an app request of version 1, and
+  `verifyRequest()`'s `SignatureVerificationException` for it, name the first
+  field that fails and its rule, such as "its `id` must be `apr_` followed by
+  32 hex characters".
+
+### Breaking
+
+- The request handler answers an ask only when its `answerUrl` is on the same
+  Siren as the client's `baseUrl`, by scheme, host and port. Siren Cloud's
+  `api.sirenaffiliates.com` and `app.sirenaffiliates.com` count as one Siren
+  over https. Any other ask gets 500, runs nothing and posts nothing, and
+  `onError` gets a `SirenException` that names both addresses and the
+  `baseUrl` to set. The answer still goes only to the client's `baseUrl`.
+  Before, such an answer went to the client's Siren and was lost.
 
 ## [0.3.0] - 2026-10-19
 

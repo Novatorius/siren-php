@@ -11,6 +11,7 @@ use Siren\Sdk\Exception\SirenException;
 use Siren\Sdk\Resources\AppRequests;
 use Siren\Sdk\Resources\Apps;
 use Siren\Sdk\Resources\Webhooks;
+use Siren\Sdk\Testing\SignedRequest;
 
 /**
  * Answers Siren's requests to an app at the app's one address. Register a
@@ -39,6 +40,7 @@ use Siren\Sdk\Resources\Webhooks;
  * | A failed check of {@see Apps::verifyRequest()}: the signature, the timestamp header or the time | 401 `{"error"}` with its words |
  * | A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
  * | A tell with a function | 200 `{}` once the function returns, or 500 when it throws |
+ * | An ask whose `answerUrl` is on another Siren than this client's `baseUrl` | 500 `{"error"}` naming both, and `onError` hears it |
  * | An ask with a function | 200 `{}` at once. The function runs after the reply, and the answer it returns is posted |
  * | An `app.request` for a feature with no function | 404 `{"error": "No function handles <kind> <key>."}` |
  * | Another event with a function from `onEvent` | 200 `{}` once it returns, or 500 when it throws |
@@ -78,6 +80,19 @@ final class AppRequestHandler
 
     private const JSON_HEADERS = ['Content-Type' => 'application/json', 'Cache-Control' => 'no-store'];
 
+    /**
+     * Siren Cloud's two public hosts, which count as one Siren when an ask's
+     * `answerUrl` is checked against the client's base address. Cloud builds
+     * `answerUrl` from its `APP_URL`, which the repository points at the app
+     * host: Siren's .github/workflows/deploy-cloud.yml checks health at
+     * https://app.sirenaffiliates.com/health, and publish-product-screenshots.yml
+     * sets APP_URL=https://app.sirenaffiliates.com. A client defaults to the
+     * api host. Cloudflare proxies both hosts to the same origin, and its
+     * nginx serves any host with `server_name _` (docs/origin-lock-runbook.md),
+     * so an answer posted to either reaches the same Siren. Both must be https.
+     */
+    private const CLOUD_HOSTS = ['api.sirenaffiliates.com', 'app.sirenaffiliates.com'];
+
     private const OPTIONS = ['toleranceSeconds', 'runLater', 'onError'];
 
     private readonly int $tolerance;
@@ -112,7 +127,9 @@ final class AppRequestHandler
         array $options = [],
     ) {
         if ($secret === '') {
-            throw new \InvalidArgumentException("apps->requestHandler() needs the app's signing secret, which Siren showed when it made the app.");
+            throw new \InvalidArgumentException(
+                "apps->requestHandler() needs the app's signing secret, which Siren showed when it made the app. Pass it, or set SIREN_SIGNING_SECRET.",
+            );
         }
 
         foreach (array_keys($options) as $name) {
@@ -241,6 +258,36 @@ final class AppRequestHandler
     }
 
     /**
+     * Runs the whole handler on a request without Siren and without posting
+     * anything: the signature check, the routing, the function, and for an
+     * ask the check the answer gets before it would be posted. The unit test
+     * hook, with {@see \Siren\Sdk\Testing\AppRequests::make()}:
+     *
+     * ```php
+     * $result = $answers->simulate(AppRequests::make('distributionResolver', 'split-by-score'));
+     * $this->assertSame('allocated', $result->answer['outcome']);
+     * ```
+     *
+     * An ask's function runs before it returns, not after the reply. A
+     * failure `onError` would hear is handed back as `error` instead.
+     */
+    public function simulate(SignedRequest $request): AppRequestSimulation
+    {
+        $trace = new \stdClass();
+        $trace->answer = null;
+        $trace->error = null;
+
+        $reply = $this->respond($request->method, $request->rawBody, $request->headers, false, $trace);
+
+        /** @var array<string, mixed>|null $answer */
+        $answer = $trace->answer;
+        /** @var \Throwable|null $error */
+        $error = $trace->error;
+
+        return new AppRequestSimulation($reply->status, $reply->headers, $reply->body, $answer, $error);
+    }
+
+    /**
      * {@see answer()} for {@see AppRequestPsrHandler}, which runs an ask's
      * work from a shutdown function. On a server that keeps workers running
      * and with no `runLater`, an ask gets 500 and `onError` hears why.
@@ -287,7 +334,7 @@ final class AppRequestHandler
      * @param string|array<mixed>|null           $rawBody
      * @param array<string, string|list<string>> $headers
      */
-    private function respond(string $method, string|array|null $rawBody, array $headers, bool $workHeld): AppRequestReply
+    private function respond(string $method, string|array|null $rawBody, array $headers, bool $workHeld, ?\stdClass $trace = null): AppRequestReply
     {
         if (strtoupper($method) !== 'POST') {
             return self::reply(405, 'Siren sends its requests with POST, and this address takes nothing else.', ['Allow' => 'POST']);
@@ -298,7 +345,7 @@ final class AppRequestHandler
         }
 
         if (!is_string($rawBody)) {
-            $this->report(new SirenException(self::RAW_BODY_NEEDED), null);
+            $this->report(new SirenException(self::RAW_BODY_NEEDED), null, $trace);
 
             return self::reply(500, self::RAW_BODY_NEEDED);
         }
@@ -319,7 +366,7 @@ final class AppRequestHandler
 
         if ($event === null || $event === Apps::REQUEST_EVENT) {
             try {
-                return $this->route(Apps::requestFrom($body, $t, $headers), $workHeld);
+                return $this->route(Apps::requestFrom($body, $t, $headers), $workHeld, $trace);
             } catch (SignatureVerificationException $e) {
                 return self::reply(400, $e->getMessage());
             }
@@ -341,7 +388,7 @@ final class AppRequestHandler
         try {
             $fn($webhook);
         } catch (\Throwable $e) {
-            $this->report($e, $webhook);
+            $this->report($e, $webhook, $trace);
 
             return self::reply(500, sprintf('The function for %s failed, so Siren will send the event again.', $event));
         }
@@ -422,7 +469,7 @@ final class AppRequestHandler
         $work();
     }
 
-    private function route(AppRequest $request, bool $workHeld): AppRequestReply
+    private function route(AppRequest $request, bool $workHeld, ?\stdClass $trace = null): AppRequestReply
     {
         $kind = (string) $request->item['kind'];
         $key = (string) $request->item['key'];
@@ -436,10 +483,24 @@ final class AppRequestHandler
             try {
                 $fn($request);
             } catch (\Throwable $e) {
-                $this->report($e, $request);
+                $this->report($e, $request, $trace);
 
                 return self::reply(500, sprintf('The function for %s %s failed, so Siren will send the request again.', $kind, $key));
             }
+
+            return self::reply(200);
+        }
+
+        $elsewhere = $this->answerGoesElsewhere($request);
+
+        if ($elsewhere !== null) {
+            $this->report(new SirenException($elsewhere), $request, $trace);
+
+            return self::reply(500, $elsewhere);
+        }
+
+        if ($trace !== null) {
+            $this->work($fn, $request, $trace);
 
             return self::reply(200);
         }
@@ -474,12 +535,12 @@ final class AppRequestHandler
      *
      * @param callable(AppRequest): mixed $fn
      */
-    private function work(callable $fn, AppRequest $request): void
+    private function work(callable $fn, AppRequest $request, ?\stdClass $trace = null): void
     {
         try {
             $answer = $fn($request);
         } catch (\Throwable $e) {
-            $this->report($e, $request);
+            $this->report($e, $request, $trace);
 
             return;
         }
@@ -494,20 +555,86 @@ final class AppRequestHandler
                 $request->item['kind'],
                 $request->item['key'],
                 get_debug_type($answer),
-            )), $request);
+            )), $request, $trace);
 
             return;
         }
 
         try {
+            if ($trace !== null) {
+                $this->requests->check($request->id, $answer);
+                $trace->answer = $answer;
+
+                return;
+            }
+
             $this->requests->answerRetried($request->id, $answer);
         } catch (\Throwable $e) {
-            $this->report($e, $request);
+            $this->report($e, $request, $trace);
         }
     }
 
-    private function report(\Throwable $error, AppRequest|WebhookEvent|null $about): void
+    /**
+     * Why an ask's answer can't go where Siren takes it, or null when it can.
+     * The answer is posted only to this client's base address, never to an
+     * address from the request, so the key can't be sent elsewhere. When the
+     * request's `answerUrl` is on another Siren, the answer would be lost, so
+     * the handler says so on the first request.
+     */
+    private function answerGoesElsewhere(AppRequest $request): ?string
     {
+        $answerUrl = (string) $request->answerUrl;
+        $base = $this->requests->baseUrl();
+        $sent = self::origin($answerUrl);
+        $ours = self::origin($base);
+
+        if ($sent !== null && $ours !== null) {
+            if ($sent === $ours) {
+                return null;
+            }
+
+            if ($sent[0] === 'https' && $ours[0] === 'https' && $sent[2] === 443 && $ours[2] === 443
+                && in_array($sent[1], self::CLOUD_HOSTS, true) && in_array($ours[1], self::CLOUD_HOSTS, true)) {
+                return null;
+            }
+        }
+
+        $sirenBase = preg_replace('#/apps/requests/[^/]+/answer$#', '', $answerUrl);
+
+        return sprintf(
+            'This request\'s answerUrl is %s, but this client sends answers to %s, so the answer would never reach the Siren that asked. Set baseUrl to %s.',
+            $answerUrl,
+            $base,
+            $sirenBase === null || $sirenBase === $answerUrl ? 'that Siren\'s API address' : $sirenBase,
+        );
+    }
+
+    /**
+     * A URL's scheme, host and port, in lowercase with the default port filled in.
+     *
+     * @return array{0: string, 1: string, 2: int}|null
+     */
+    private static function origin(string $url): ?array
+    {
+        $parts = parse_url($url);
+
+        if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
+            return null;
+        }
+
+        $scheme = strtolower($parts['scheme']);
+
+        return [$scheme, strtolower($parts['host']), $parts['port'] ?? ($scheme === 'https' ? 443 : 80)];
+    }
+
+    private function report(\Throwable $error, AppRequest|WebhookEvent|null $about, ?\stdClass $trace = null): void
+    {
+        if ($trace !== null) {
+            $trace->error ??= $error;
+
+            return;
+        }
+
         try {
             ($this->onError)($error, $about);
         } catch (\Throwable $failure) {

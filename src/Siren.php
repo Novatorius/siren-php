@@ -46,12 +46,14 @@ use Siren\Sdk\Resources\Webhooks;
  * ```
  *
  * Configuration keys:
- * - `apiKey` — the `sk_live_...` key from the Siren dashboard. Required
- *   unless `accessToken` is given.
+ * - `apiKey` — the `sk_live_...` key from the Siren dashboard, or the
+ *   app's key. Defaults to the `SIREN_API_KEY` environment variable when
+ *   neither it nor `accessToken` is given.
  * - `accessToken` — an {@see AccessTokenSource} (or a plain token string)
  *   for hosts that hold an OAuth grant. The SDK refreshes it once after a
  *   401 and repeats the request.
- * - `baseUrl` — defaults to `https://api.sirenaffiliates.com/siren/v1`.
+ * - `baseUrl` — defaults to Siren Cloud, `https://api.sirenaffiliates.com/siren/v1`.
+ *   Set it only for a local or sandbox Siren.
  * - `timeout` — request timeout in seconds, default 30.
  * - `maxRetries` — retries for network errors and 429/5xx on idempotent
  *   operations, default 2. Writes and management calls are never
@@ -161,8 +163,10 @@ class Siren
      *     tokenCache?: \Psr\SimpleCache\CacheInterface|false,
      * } $config
      */
-    public function __construct(array $config)
+    public function __construct(array $config = [])
     {
+        $config['apiKey'] = self::apiKeyFrom($config);
+
         $maxRetries = (int) ($config['maxRetries'] ?? self::DEFAULT_MAX_RETRIES);
 
         if ($maxRetries < 0) {
@@ -228,12 +232,31 @@ class Siren
 
         if (!is_string($apiKey) || $apiKey === '') {
             throw new \InvalidArgumentException(
-                'The "apiKey" option is required. Mint one in the Siren dashboard (Settings > API Keys), '
-                . 'or pass an "accessToken" source.',
+                'The Siren client needs a key. Pass the "apiKey" option or set the SIREN_API_KEY environment variable. '
+                . 'An app uses its own key, which Siren showed when it made the app. Or pass an "accessToken" source.',
             );
         }
 
         return new StaticAccessToken($apiKey);
+    }
+
+    /**
+     * The key the client sends with: the `apiKey` option, or else, when no
+     * `accessToken` is given either, the `SIREN_API_KEY` environment variable.
+     *
+     * @param array<string, mixed> $config
+     */
+    private static function apiKeyFrom(array $config): mixed
+    {
+        $apiKey = $config['apiKey'] ?? null;
+
+        if ($apiKey !== null || ($config['accessToken'] ?? null) !== null) {
+            return $apiKey;
+        }
+
+        $fromEnvironment = getenv('SIREN_API_KEY');
+
+        return is_string($fromEnvironment) && $fromEnvironment !== '' ? $fromEnvironment : null;
     }
 
     /**

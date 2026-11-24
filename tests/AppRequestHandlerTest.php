@@ -82,7 +82,7 @@ final class AppRequestHandlerTest extends TestCase
     private function handler(array $responses = [], array $options = [], array $config = []): AppRequestHandler
     {
         $this->errors = [];
-        $siren = $this->mockSiren($responses, $config);
+        $siren = $this->mockSiren($responses, $config + ['baseUrl' => self::FIXTURE_SIREN]);
 
         return $siren->apps->requestHandler(self::secret(), $options + ['onError' => function (\Throwable $error, ?object $about): void {
             $this->errors[] = [$error, $about];
@@ -220,7 +220,7 @@ final class AppRequestHandlerTest extends TestCase
 
         // The words are verifyRequest's own, for the same request.
         try {
-            $this->mockSiren([])->apps->verifyRequest($body, ['X-Siren-Event' => 'app.request'] + $headers, self::secret());
+            $this->mockSiren([], ['baseUrl' => self::FIXTURE_SIREN])->apps->verifyRequest($body, ['X-Siren-Event' => 'app.request'] + $headers, self::secret());
             $this->fail('verifyRequest() took a request the handler refused.');
         } catch (SignatureVerificationException $e) {
             $this->assertSame($e->getMessage(), json_decode($reply->body, true)['error']);
@@ -535,7 +535,7 @@ final class AppRequestHandlerTest extends TestCase
 
         $request = $this->lastRequest();
         $this->assertSame('POST', $request->getMethod());
-        $this->assertSame('https://api.sirenaffiliates.com/siren/v1/apps/requests/apr_9c60190a4501399d0ae55f041c237b39/answer', (string) $request->getUri());
+        $this->assertSame(self::FIXTURE_SIREN . '/apps/requests/apr_9c60190a4501399d0ae55f041c237b39/answer', (string) $request->getUri());
         $this->assertSame('Bearer ' . self::API_KEY, $request->getHeaderLine('Authorization'));
         $this->assertSame('application/json', $request->getHeaderLine('Content-Type'));
         $this->assertSame([], $this->errors, 'Siren taking the same answer again is no error.');
@@ -623,7 +623,7 @@ final class AppRequestHandlerTest extends TestCase
 
     public function testRequestsAnswerItselfIsStillSentOnce(): void
     {
-        $siren = $this->mockSiren([self::jsonResponse(503, []), self::jsonResponse(200, ['status' => 'accepted'])]);
+        $siren = $this->mockSiren([self::jsonResponse(503, []), self::jsonResponse(200, ['status' => 'accepted'])], ['baseUrl' => self::FIXTURE_SIREN]);
         $siren->apps->requestHandler(self::secret());
 
         try {
@@ -707,7 +707,7 @@ final class AppRequestHandlerTest extends TestCase
     public function testTheSecretAndOptionsAreChecked(string $secret, array $options, string $words): void
     {
         try {
-            $this->mockSiren([])->apps->requestHandler($secret, $options);
+            $this->mockSiren([], ['baseUrl' => self::FIXTURE_SIREN])->apps->requestHandler($secret, $options);
             $this->fail('A bad option was taken.');
         } catch (\InvalidArgumentException $e) {
             $this->assertStringContainsString('apps->requestHandler()', $e->getMessage());
@@ -746,7 +746,7 @@ final class AppRequestHandlerTest extends TestCase
         $previous = ini_set('error_log', (string) $log);
 
         try {
-            $handler = $this->mockSiren([])->apps->requestHandler(self::secret())->on('postConversionAction', static function (): void {
+            $handler = $this->mockSiren([], ['baseUrl' => self::FIXTURE_SIREN])->apps->requestHandler(self::secret())->on('postConversionAction', static function (): void {
                 throw new \RuntimeException('The CRM is down.');
             });
             $body = self::body('postConversionAction');
@@ -764,7 +764,7 @@ final class AppRequestHandlerTest extends TestCase
 
     public function testAnOnErrorThatThrowsDoesNotChangeTheReply(): void
     {
-        $handler = $this->mockSiren([])->apps->requestHandler(self::secret(), ['onError' => static function (): never {
+        $handler = $this->mockSiren([], ['baseUrl' => self::FIXTURE_SIREN])->apps->requestHandler(self::secret(), ['onError' => static function (): never {
             throw new \LogicException('The logger broke.');
         }])->on('postConversionAction', static function (): void {
             throw new \RuntimeException('The CRM is down.');

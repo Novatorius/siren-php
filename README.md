@@ -1,18 +1,16 @@
 # Siren SDK for PHP
 
-Affiliate and incentive tracking for any commerce stack. Record sales, answer Siren from your own app, verify signed webhooks and reconcile your ledger in a few lines of PHP.
+Answer Siren from your own PHP app in a few lines. One handler checks each signed request Siren sends, runs your function, and posts the answer back. The same client records sales, verifies webhooks and reconciles your ledger.
 
 [![Packagist Version](https://img.shields.io/packagist/v/siren/sdk.svg)](https://packagist.org/packages/siren/sdk)
 [![CI](https://github.com/Novatorius/siren-php/actions/workflows/ci.yml/badge.svg)](https://github.com/Novatorius/siren-php/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![PHP Version](https://img.shields.io/packagist/php-v/siren/sdk.svg)](https://packagist.org/packages/siren/sdk)
 
-## What is Siren?
-
-[Siren](https://sirenaffiliates.com) is an affiliate, referral, and incentive
-platform. You track the events that matter — sales, refunds, referred visits —
-and Siren attributes them to collaborators, calculates rewards, and manages
-payouts.
+[Siren](https://sirenaffiliates.com) is an affiliate, referral and incentive
+platform. You track the events that matter, such as sales, refunds and
+referred visits, and Siren credits collaborators, works out rewards and pays
+them.
 
 ## What you can do
 
@@ -23,6 +21,10 @@ This SDK is the official PHP client for the Siren API. With it you can:
   feature, replies, and posts an ask's answer. Mount it in plain PHP, Slim,
   Mezzio, Laravel or any framework. See
   [Answer Siren in a few lines](#answer-siren-in-a-few-lines).
+- Try a handler without Siren. `Siren\Sdk\Testing\AppRequests::make()`
+  builds a signed request with Siren's own sample question, and
+  `simulate()` runs the handler on it and gives back the answer without
+  posting it. See [Try it without Siren](#try-it-without-siren).
 - Answer every kind of app feature, from post-conversion and post-allocation
   actions to resolvers, filters, calculations, group structures and payout
   methods, with PHPStan types for each question and answer. See
@@ -49,19 +51,36 @@ This SDK is the official PHP client for the Siren API. With it you can:
 
 The full API surface is described in the [OpenAPI spec](./openapi.yaml).
 
-## Requirements
-
-- PHP 8.1+
-- `ext-json`
-- Optional: `guzzlehttp/guzzle` ^7.8. The SDK uses Guzzle when it is installed
-  and PHP's own HTTP streams when it is not, so a host that already ships its
-  own HTTP stack never has to load a second copy of Guzzle.
-
 ## Install
+
+The SDK needs PHP 8.1 or later and `ext-json`. It uses `guzzlehttp/guzzle`
+^7.8 when it is installed and PHP's own HTTP streams when it is not, so a host
+that already ships its own HTTP stack never loads a second copy of Guzzle.
 
 ```bash
 composer require siren/sdk
 ```
+
+The apps code in this README is unreleased. That covers the request handler,
+`Siren\Sdk\Testing`, `verifyRequest()`, `requests->answer()`, `splitPool()`
+and app tokens for custom events. The `siren/sdk` on Packagist lacks it until
+the apps pull request merges and a release ships. Until then, install the
+`feat/apps` branch from GitHub:
+
+```bash
+composer config repositories.siren vcs https://github.com/Novatorius/siren-php
+composer require siren/sdk:dev-feat/apps
+```
+
+Or install it from a checkout beside your project:
+
+```bash
+composer config repositories.siren path ../siren-php
+composer require siren/sdk:@dev
+```
+
+A checkout has no version tag, so Composer reads it as a dev version. `@dev`
+lets your project take it even when its `minimum-stability` is `stable`.
 
 ## Answer Siren in a few lines
 
@@ -74,9 +93,10 @@ says what happened and waits for a 2xx. An ask waits for an answer.
 function for each feature by its kind and key, and mount the handler at the
 app's address. It checks Siren's signature, finds the function, replies, and
 for an ask posts the answer the function returns once the reply has gone.
-Make the client with the app's own key, since the handler posts answers with
-it, and pass the app's signing secret, which Siren showed once when it made
-the app's address.
+`new Siren()` reads the app's own key from `SIREN_API_KEY`, and the handler
+posts answers with it. `requestHandler()` reads the app's signing secret,
+which Siren showed once when it made the app's address, from
+`SIREN_SIGNING_SECRET`. Pass either one in code to override the variable.
 
 With no framework, put this in the file the app's address points at:
 
@@ -86,9 +106,9 @@ With no framework, put this in the file the app's address points at:
 require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
-$siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
+$siren = new Siren();         // the app's key, from SIREN_API_KEY
 
-$siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
+$siren->apps->requestHandler() // the signing secret, from SIREN_SIGNING_SECRET
     ->on('postConversionAction', 'tell-the-crm', function ($request) {
         // Siren may send it twice, so add it once, keyed by $request->id.
         addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
@@ -96,12 +116,59 @@ $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
     ->serve();
 ```
 
-`baseUrl` is your Siren Cloud's API address. `serve()` reads `php://input`
-and the headers, and for an ask it sends the reply, ends the response with
-`fastcgi_finish_request()` or `litespeed_finish_request()`, or with
-`Content-Length`, `Connection: close` and a flush on other servers, and then
-runs the function. Only the function changes from feature to feature, and
-[Feature kinds](#feature-kinds) gives one for each kind.
+`serve()` reads `php://input` and the headers, and for an ask it sends the
+reply, ends the response with `fastcgi_finish_request()` or
+`litespeed_finish_request()`, or with `Content-Length`, `Connection: close`
+and a flush on other servers, and then runs the function. Only the function
+changes from feature to feature, and [Feature kinds](#feature-kinds) gives
+one for each kind.
+
+## Try it without Siren
+
+`Siren\Sdk\Testing\AppRequests::make($kind, $key)` builds the request Siren
+would send, signed, with Siren's own sample question for the kind.
+`simulate()` runs the whole handler on it, from the signature check to the
+check an answer gets before it is posted, and gives back the reply and the
+answer without posting anything. This PHPUnit test runs a distribution
+resolver:
+
+<!-- readme-test: try-it -->
+```php
+<?php
+use PHPUnit\Framework\TestCase;
+use Siren\Sdk\Siren;
+use Siren\Sdk\Testing\AppRequests;
+
+final class SplitByScoreTest extends TestCase
+{
+    public function testItSplitsThePoolByScore(): void
+    {
+        $siren = new Siren(['apiKey' => 'sk_test_unused']); // simulate() posts nothing
+        $answers = $siren->apps->requestHandler('test-secret')
+            ->on('distributionResolver', 'split-by-score', fn ($request) => [
+                'outcome' => 'allocated',
+                'units' => $request->data['pool']['units'],
+                'shares' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['metrics'], 'score', 'metricId')),
+            ]);
+
+        $request = AppRequests::make('distributionResolver', 'split-by-score', ['secret' => 'test-secret']);
+        $result = $answers->simulate($request);
+
+        $this->assertSame(200, $result->status);
+        $this->assertSame(['41' => 6000, '43' => 4000], $result->answer['shares']);
+    }
+}
+```
+
+`$result` also carries `headers`, `body`, and `error`, which holds what
+`onError` would have heard, such as a function that threw or an answer with
+no `outcome`. `make()` takes `data` for your own question, and `secret`,
+which defaults to `SIREN_SIGNING_SECRET`. `AppRequests::sampleData($kind)`
+gives the sample question alone. To try a running app, post the same
+request's `method`, `headers` and `rawBody` to its address with any HTTP
+client.
+
+## Run the handler in your app
 
 ### Mount it in a framework
 
@@ -143,7 +210,7 @@ since Siren signs the request instead.
 
 <!-- readme-test: handler-options -->
 ```php
-$answers = $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'), [
+$answers = $siren->apps->requestHandler(options: [ // the secret, from SIREN_SIGNING_SECRET
     'toleranceSeconds' => 300,                          // as verifyRequest(), 1 to 3600
     'runLater' => fn ($work) => app()->terminating($work), // where an ask's work runs after the reply
     'onError' => fn (\Throwable $error, ?object $about) => report($error), // default error_log()
@@ -187,9 +254,10 @@ its signature and time, as it checks an app request.
 | A body over 1 MiB, more than Siren sends | 413 `{"error"}` |
 | A body a parser already read, so there are no bytes to check | 500 `{"error"}` that says to mount the handler before the JSON parser, or give the route a raw body. `onError` hears it too. |
 | `X-Siren-Signature-V2` missing or wrong, `X-Siren-Timestamp` different from the signed time, or a time more than `toleranceSeconds` from the clock | 401 `{"error"}` with `verifyRequest()`'s words |
-| A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
+| A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` naming the first field that fails, such as ``its `id` must be `apr_` followed by 32 hex characters`` |
 | A tell with a function | 200 `{}` once the function returns, or 500 when it throws, so Siren tries again about 1, 2, 4 and 8 minutes later |
-| An ask with a function | 200 `{}` at once, then the function runs and the answer it returns is posted |
+| An ask whose `answerUrl` is on another Siren than the client's `baseUrl` | 500 `{"error"}` naming both addresses and the `baseUrl` to set, and `onError` hears it. Nothing runs and nothing is posted. |
+| An ask with a function | 200 `{}` at once, then the function runs and the answer it returns is posted to the client's own `baseUrl` |
 | An `app.request` for a feature with no function | 404 `{"error": "No function handles distributionResolver split-by-score."}`, so Siren tries again and then shows the request under Needs attention |
 | Another `X-Siren-Event` with a function from `onEvent()` | 200 `{}` once it returns, or 500 when it throws |
 | Another `X-Siren-Event` with no function | 200 `{}` |
@@ -718,7 +786,7 @@ payout method answers every payout it is asked about:
 require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
-$siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
+$siren = new Siren(); // the app's key, from SIREN_API_KEY
 
 $request = $siren->apps->verifyRequest(
     file_get_contents('php://input'),
@@ -740,7 +808,8 @@ that `X-Siren-Event` is `app.request` when present, that
 body, that `X-Siren-Timestamp` matches `t`, that `t` is within
 `$toleranceSeconds` of the clock (300 by default, at most 3600), and that the
 body is an app request of version 1. Each failure throws
-`SignatureVerificationException` with the reason. Pass the body exactly as
+`SignatureVerificationException` with the reason, which for the body names
+the first field that fails. Pass the body exactly as
 received. Siren may send one request more than once, so drop a repeat by
 `$request->id`.
 
@@ -806,7 +875,7 @@ When the function throws or no answer lands, Siren asks again after
 
 <!-- readme-test: on-error -->
 ```php
-$answers = $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'), [
+$answers = $siren->apps->requestHandler(options: [ // the secret, from SIREN_SIGNING_SECRET
     'onError' => function (\Throwable $error, ?object $about) {
         if ($error instanceof \Siren\Sdk\Exception\ConflictException && $error->getErrorCode() === 'app_request_dropped') {
             // Siren stopped waiting, so undo whatever the app did for this request.
@@ -863,7 +932,11 @@ $siren->events->refund([
 
 ### Verify a webhook
 
-Siren signs every delivery with `X-Siren-Signature: sha256=<hex hmac>` — an
+This section is for webhook subscriptions. An app's address gets the V2
+signature, `X-Siren-Signature-V2`, and the request handler checks it, so an
+app needs none of the code below.
+
+Siren signs every delivery with `X-Siren-Signature: sha256=<hex hmac>`, an
 HMAC-SHA256 of the **raw request body** keyed by your subscription's signing
 secret. The body is the event's payload. Siren names the event in the
 `X-Siren-Event` header and the delivery in `X-Siren-Delivery`, which stays
@@ -1069,8 +1142,8 @@ $approved = $siren->conversions->list(['status' => ConversionStatus::APPROVED]);
 
 ```php
 $siren = new Siren([
-    'apiKey'     => 'sk_live_...',                              // or 'accessToken', see below
-    'baseUrl'    => 'https://api.sirenaffiliates.com/siren/v1', // default
+    'apiKey'     => 'sk_live_...',                              // default SIREN_API_KEY, or 'accessToken', see below
+    'baseUrl'    => 'https://api.sirenaffiliates.com/siren/v1', // default, Siren Cloud
     'timeout'    => 30,                                         // seconds, default 30
     'maxRetries' => 2,                                          // default 2
     'httpClient' => $client,                                    // optional, see below
@@ -1078,7 +1151,17 @@ $siren = new Siren([
 ]);
 ```
 
-Pass `apiKey` or `accessToken`, not both. `tokenCache` keeps app tokens
+Pass `apiKey` or `accessToken`, not both. With neither, the client reads
+`SIREN_API_KEY`, and with no key there either it refuses to start, naming the
+option and the variable.
+
+The client talks to Siren Cloud. Set `baseUrl` only for a local or sandbox
+Siren. The request handler posts an ask's answer only to `baseUrl`, never to
+an address from the request, so an ask from another Siren gets a 500 whose
+error says which `baseUrl` to set. Siren Cloud's two hosts,
+`api.sirenaffiliates.com` and `app.sirenaffiliates.com`, count as one Siren.
+
+`tokenCache` keeps app tokens
 between requests: a PSR-16 `Psr\SimpleCache\CacheInterface`, or `false` for
 memory only. `httpClient` takes a
 `Siren\Sdk\Http\HttpClient` or a preconfigured `GuzzleHttp\ClientInterface`.
@@ -1439,7 +1522,9 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `events->browserTokenHandler($options)`, `events->serveBrowserToken($options)` | `siren.events.browserTokenHandler(options)` | `POST /oauth/token` | the app's key |
 | `apps->verifyRequest($rawBody, $headers, $secret, $toleranceSeconds, $now)` | `siren.apps.verifyRequest(rawBody, headers, secret, options)` | none | none |
 | `apps->requests->answer($id, $answer)` | `siren.apps.requests.answer(id, answer)` | `POST /apps/requests/{id}/answer` | the app's key |
-| `apps->requestHandler($signingSecret, $options)`, with `on`, `onEvent`, `serve`, `psr15` and `answer` | `siren.apps.requestHandler(options)`, with `on`, `onEvent`, `handle` and its Node, Web and Fastify mounts | `POST /apps/requests/{id}/answer` for an ask's answer | the app's key |
+| `apps->requestHandler($signingSecret, $options)`, with `on`, `onEvent`, `serve`, `psr15`, `answer` and `simulate`. The secret defaults to `SIREN_SIGNING_SECRET`. | `siren.apps.requestHandler(options)`, with `on`, `onEvent`, `handle`, `simulate` and its Node, Web and Fastify mounts | `POST /apps/requests/{id}/answer` for an ask's answer, to the client's `baseUrl` only | the app's key |
+| `Siren\Sdk\Testing\AppRequests::make($kind, $key, $options)`, `AppRequests::sampleData($kind)` | `appRequest(kind, key, options)`, `sampleData(kind)` from `@novatorius/siren/testing` | none | none |
+| `new Siren()` reads `SIREN_API_KEY` | `new Siren()` reads `SIREN_API_KEY` | none | none |
 | `Apps::splitPool($pool, $weights)` | `siren.apps.splitPool(pool, weights)` | none | none |
 
 Every route above but the token route takes an organization-wide key only.

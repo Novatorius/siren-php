@@ -126,7 +126,7 @@ final class AppCollaboratorGroupStructureTest extends TestCase
         $siren = $this->mockSiren([
             self::jsonResponse(200, ['status' => 'accepted']),
             self::jsonResponse(200, ['status' => 'accepted']),
-        ]);
+        ], ['baseUrl' => self::FIXTURE_SIREN]);
         $handler = $siren->apps->requestHandler(self::secret(), ['onError' => function (\Throwable $error) use (&$errors): void {
             $errors[] = $error;
         }]);
@@ -180,7 +180,7 @@ final class AppCollaboratorGroupStructureTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('structureAnswers')]
     public function testAnAnswerOfEachShapeIsSentAsItIs(array $answer): void
     {
-        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted', 'duplicate' => false])]);
+        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted', 'duplicate' => false])], ['baseUrl' => self::FIXTURE_SIREN]);
 
         $receipt = $siren->apps->requests->answer(self::REQUEST_ID, $answer);
 

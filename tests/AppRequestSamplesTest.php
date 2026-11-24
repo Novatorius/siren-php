@@ -18,10 +18,13 @@ use PHPUnit\Framework\Attributes\Group;
  *
  * Each runs from the README's own text, which must equal the copy here. Only
  * two things are added around a sample: a prepended file that stubs
- * `addToCrm()` and `noteShare()`, and the fake Siren's address in place of
- * `https://cloud.example.com/siren/v1`, which the feature page fills in. The
+ * `addToCrm()` and `noteShare()`, and the fake Siren's address as the
+ * client's `baseUrl` in place of Siren Cloud's default, since `new Siren()`
+ * becomes `new Siren(['baseUrl' => <the fake Siren>])`. The key and the
+ * secret come from SIREN_API_KEY and SIREN_SIGNING_SECRET, as in an app. The
  * sample's own `require 'vendor/autoload.php';` loads the SDK, through a
- * `vendor` link beside it, as it would in an app.
+ * `vendor` link beside it, as it would in an app. The requests are signed by
+ * the SDK's own `Siren\Sdk\Testing\AppRequests::make()`.
  */
 #[Group('local-server')]
 final class AppRequestSamplesTest extends TestCase
@@ -37,9 +40,9 @@ final class AppRequestSamplesTest extends TestCase
 require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
-$siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
+$siren = new Siren();         // the app's key, from SIREN_API_KEY
 
-$siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
+$siren->apps->requestHandler() // the signing secret, from SIREN_SIGNING_SECRET
     ->on('postConversionAction', 'tell-the-crm', function ($request) {
         // Siren may send it twice, so add it once, keyed by $request->id.
         addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
@@ -138,9 +141,9 @@ PHP;
 require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
-$siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
+$siren = new Siren();
 
-$handler = $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
+$handler = $siren->apps->requestHandler()
     ->on('distributionResolver', 'split-by-score', fn ($request) => [
         'outcome' => 'allocated',
         'units' => $request->data['pool']['units'],
@@ -167,6 +170,7 @@ PHP;
     private static string $sirenLog = '';
     private static string $stubLog = '';
     private static string $app = '';
+    private static string $sirenUrl = '';
 
     public static function setUpBeforeClass(): void
     {
@@ -201,7 +205,8 @@ PHP;
         ];
 
         foreach ($samples as $name => $code) {
-            file_put_contents(self::$dir . '/app/' . $name . '.php', str_replace('https://cloud.example.com/siren/v1', $siren, $code));
+            self::assertSame(1, substr_count($code, 'new Siren()'), $name . ' makes its client with new Siren().');
+            file_put_contents(self::$dir . '/app/' . $name . '.php', str_replace('new Siren()', "new Siren(['baseUrl' => '{$siren}'])", $code));
         }
 
         file_put_contents(self::$dir . '/prelude.php', self::PRELUDE);
@@ -211,6 +216,7 @@ PHP;
             ['-d', 'auto_prepend_file=' . self::$dir . '/prelude.php', '-S', '127.0.0.1:%d', '-t', self::$dir . '/app'],
             ['SIREN_API_KEY' => self::APP_KEY, 'SIREN_SIGNING_SECRET' => self::secret(), 'STUB_LOG' => self::$stubLog],
         );
+        self::$sirenUrl = $siren;
     }
 
     public static function tearDownAfterClass(): void
@@ -279,27 +285,19 @@ PHP;
     }
 
     /**
-     * Signs the kind's request now, as Siren's WebhookSignature::headers() does, and posts it.
+     * Signs the kind's request now with the SDK's testing helper, its
+     * answerUrl on the fake Siren, and posts it.
      *
      * @return array{0: int, 1: string, 2: float}
      */
     private static function send(string $file, string $kind): array
     {
-        $body = json_encode(self::contract($kind)['request'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        $t = time();
+        $request = self::signedContract($kind, self::secret(), self::$sirenUrl);
         $started = microtime(true);
 
-        $response = (new Client(['http_errors' => false, 'timeout' => 10]))->post(self::$app . '/' . $file . '.php', [
-            'body' => $body,
-            'headers' => [
-                'Content-Type' => 'application/json',
-                'X-Siren-Event' => 'app.request',
-                'X-Siren-Delivery' => 'apr_9c60190a4501399d0ae55f041c237b39.1',
-                'User-Agent' => 'Siren-Webhooks/1.0',
-                'X-Siren-Timestamp' => (string) $t,
-                'X-Siren-Signature-V2' => 't=' . $t . ',v1=' . hash_hmac('sha256', $t . '.' . $body, self::secret()),
-                'Idempotency-Key' => 'apr_9c60190a4501399d0ae55f041c237b39',
-            ],
+        $response = (new Client(['http_errors' => false, 'timeout' => 10]))->request($request->method, self::$app . '/' . $file . '.php', [
+            'body' => $request->rawBody,
+            'headers' => $request->headers + ['User-Agent' => 'Siren-Webhooks/1.0'],
         ]);
 
         return [$response->getStatusCode(), (string) $response->getBody(), microtime(true) - $started];
@@ -453,6 +451,8 @@ PHP;
         $this->assertNotFalse($kinds);
         $this->assertNotFalse($payout);
         $this->assertLessThan(strpos($readme, '### What the handler replies'), $at[0], 'The whole sample leads the handler section.');
+        $this->assertLessThan($handler, strpos($readme, "\n## Install\n"), 'Install comes before the first sample.');
+        $this->assertStringNotContainsString('baseUrl', substr($readme, $at[0], strpos($readme, "\n## Try it without Siren\n") - $at[0]), 'The first sample and its words leave baseUrl out.');
         $this->assertGreaterThan($handler, $at[0]);
         $this->assertLessThan(strpos($readme, "\n## Quickstart\n"), $handler, 'The handler comes before the quickstart.');
 
@@ -464,6 +464,32 @@ PHP;
 
         $this->assertGreaterThan($payout, strpos($readme, '<!-- readme-test: answer-payout -->'));
         $this->assertGreaterThan(strpos($readme, "\n## Check and answer by hand\n"), strpos($readme, "\$request = \$siren->apps->verifyRequest("), 'verifyRequest is under the low-level path.');
+    }
+
+    public function testTheTryItWithoutSirenSamplePassesUnderPhpUnit(): void
+    {
+        $readme = (string) file_get_contents(dirname(__DIR__) . '/README.md');
+        $first = strpos($readme, '<!-- readme-test: answer-tell -->');
+        $try = strpos($readme, "\n## Try it without Siren\n");
+        $this->assertNotFalse($try);
+        $this->assertGreaterThan($first, $try, 'Try it without Siren follows the first sample.');
+        $this->assertLessThan(strpos($readme, "\n## Feature kinds\n"), $try);
+        $this->assertSame($try, strpos($readme, "\n## ", $first), 'No section sits between the first sample and Try it without Siren.');
+
+        $file = self::$dir . '/SplitByScoreTest.php';
+        file_put_contents($file, self::readme('try-it'));
+
+        $command = [PHP_BINARY, dirname(__DIR__) . '/vendor/bin/phpunit', '--no-configuration', '--bootstrap', dirname(__DIR__) . '/vendor/autoload.php', $file];
+        $env = getenv();
+        unset($env['SIREN_API_KEY'], $env['SIREN_SIGNING_SECRET']);
+        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, self::$dir, $env);
+        $this->assertIsResource($process);
+        fclose($pipes[0]);
+        $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+        $code = proc_close($process);
+
+        $this->assertSame(0, $code, $out);
+        $this->assertStringContainsString('OK (1 test, 2 assertions)', $out);
     }
 
     public function testABodyOverOneMebibyteGets413(): void

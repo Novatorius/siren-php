@@ -121,7 +121,7 @@ final class Apps
      * for the feature, replies, and posts an ask's answer after the reply.
      *
      * ```php
-     * $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
+     * $siren->apps->requestHandler()
      *     ->on('postConversionAction', 'tell-the-crm', function ($request) { ... })
      *     ->serve();
      * ```
@@ -129,7 +129,8 @@ final class Apps
      * {@see AppRequestHandler} gives each reply. It posts an answer with
      * this client's key, so make the client with the app's own key.
      *
-     * @param string $signingSecret The app's signing secret, which Siren showed when it made the app.
+     * @param string|null $signingSecret The app's signing secret, which Siren showed when it made the app.
+     *     Defaults to the `SIREN_SIGNING_SECRET` environment variable.
      * @param array{toleranceSeconds?: int, runLater?: callable(callable(): void): void, onError?: callable(\Throwable, AppRequest|WebhookEvent|null): void} $options
      *     `toleranceSeconds`: as {@see verifyRequest()}, 1 to 3600, default 300.
      *     `runLater`: takes an ask's work after the reply, such as
@@ -138,8 +139,13 @@ final class Apps
      *
      * @throws \InvalidArgumentException For an empty secret or an option it can't use.
      */
-    public function requestHandler(string $signingSecret, array $options = []): AppRequestHandler
+    public function requestHandler(#[\SensitiveParameter] ?string $signingSecret = null, array $options = []): AppRequestHandler
     {
+        if ($signingSecret === null) {
+            $fromEnvironment = getenv('SIREN_SIGNING_SECRET');
+            $signingSecret = is_string($fromEnvironment) ? $fromEnvironment : '';
+        }
+
         return new AppRequestHandler($this->requests, $signingSecret, $options);
     }
 
@@ -291,8 +297,10 @@ final class Apps
      */
     public static function requestFrom(mixed $body, int $t, array $headers): AppRequest
     {
-        if (!self::isEnvelope($body)) {
-            throw new SignatureVerificationException('The signed body is not an app request of version 1.');
+        $problem = self::envelopeProblem($body);
+
+        if ($problem !== null) {
+            throw new SignatureVerificationException(sprintf('The signed body is not an app request of version 1: %s.', $problem));
         }
 
         /** @var array<string, mixed> $body */
@@ -354,32 +362,38 @@ final class Apps
         return [(int) $times[0], $signatures];
     }
 
-    /** Whether the body is an app request of version 1, as Siren's `AppRequestEnvelope` builds it. */
-    private static function isEnvelope(mixed $body): bool
+    /**
+     * What first keeps the body from being an app request of version 1, as
+     * Siren's `AppRequestEnvelope` builds it, in words that name the field
+     * and its rule, or null when it is one.
+     */
+    private static function envelopeProblem(mixed $body): ?string
     {
-        if (!is_array($body) || array_is_list($body)) {
-            return false;
+        if (!is_array($body) || ($body !== [] && array_is_list($body))) {
+            return 'the body must be a JSON object';
         }
 
         $item = $body['item'] ?? null;
         $mode = $body['mode'] ?? null;
+        $isObject = static fn (mixed $value): bool => is_array($value) && ($value === [] || !array_is_list($value));
 
-        return ($body['version'] ?? null) === 1
-            && is_string($body['id'] ?? null)
-            && preg_match(AppRequests::REQUEST_ID_PATTERN, $body['id']) === 1
-            && ($body['type'] ?? null) === self::REQUEST_EVENT
-            && is_string($body['app'] ?? null)
-            && $body['app'] !== ''
-            && is_array($item)
-            && ($item === [] || !array_is_list($item))
-            && is_string($item['kind'] ?? null)
-            && is_string($item['key'] ?? null)
-            && is_string($item['id'] ?? null)
-            && is_string($body['createdAt'] ?? null)
-            && is_array($body['data'] ?? null)
-            && ($body['data'] === [] || !array_is_list($body['data']))
-            && ($mode === 'tell' || $mode === 'ask')
-            && ($mode === 'tell' || (is_string($body['answerBy'] ?? null) && is_string($body['answerUrl'] ?? null)));
+        return match (true) {
+            ($body['version'] ?? null) !== 1 => 'its `version` must be 1',
+            !is_string($body['id'] ?? null) || preg_match(AppRequests::REQUEST_ID_PATTERN, $body['id']) !== 1
+                => 'its `id` must be `apr_` followed by 32 hex characters, such as apr_9c60190a4501399d0ae55f041c237b39',
+            ($body['type'] ?? null) !== self::REQUEST_EVENT => 'its `type` must be `app.request`',
+            $mode !== 'tell' && $mode !== 'ask' => 'its `mode` must be `tell` or `ask`',
+            !is_string($body['app'] ?? null) || $body['app'] === '' => "its `app` must be the app's key, as text",
+            !$isObject($item) => 'its `item` must be an object with the feature\'s kind, key and id',
+            !is_string($item['kind'] ?? null) => 'its `item.kind` must be text, such as distributionResolver',
+            !is_string($item['key'] ?? null) => "its `item.key` must be text, the feature's key",
+            !is_string($item['id'] ?? null) => 'its `item.id` must be text, such as app:12',
+            !is_string($body['createdAt'] ?? null) => 'its `createdAt` must be a date as text, in ISO 8601',
+            !$isObject($body['data'] ?? null) => 'its `data` must be an object, the question',
+            $mode === 'ask' && !is_string($body['answerBy'] ?? null) => "an ask's `answerBy` must be a date as text, in ISO 8601",
+            $mode === 'ask' && !is_string($body['answerUrl'] ?? null) => "an ask's `answerUrl` must be the address Siren takes the answer at, as text",
+            default => null,
+        };
     }
 
     /**

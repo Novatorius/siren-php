@@ -112,7 +112,7 @@ final class AppTransactionFilterTest extends TestCase
     public function testTheReadmeSampleIncludesOnlyTheLineItems(): void
     {
         $errors = [];
-        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted'])]);
+        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted'])], ['baseUrl' => self::FIXTURE_SIREN]);
         $handler = $siren->apps->requestHandler(self::secret(), ['onError' => function (\Throwable $error) use (&$errors): void {
             $errors[] = $error;
         }]);
@@ -132,7 +132,7 @@ final class AppTransactionFilterTest extends TestCase
 
     public function testTheHandlerPostsADistributorsAnswerAsTheFunctionReturnsIt(): void
     {
-        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted'])]);
+        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted'])], ['baseUrl' => self::FIXTURE_SIREN]);
         $handler = $siren->apps->requestHandler(self::secret());
         $handler->on('transactionFilter', 'nothing-late', static function (AppRequest $request): array {
             $late = $request->data['distribution'] !== null && $request->data['refundDistribution'] !== null;
@@ -168,7 +168,7 @@ final class AppTransactionFilterTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('filterAnswers')]
     public function testAnAnswerIsSentAsItIs(array $answer): void
     {
-        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted', 'duplicate' => false])]);
+        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted', 'duplicate' => false])], ['baseUrl' => self::FIXTURE_SIREN]);
 
         $receipt = $siren->apps->requests->answer(self::REQUEST_ID, $answer);
 

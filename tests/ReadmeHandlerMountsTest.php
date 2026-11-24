@@ -54,18 +54,12 @@ final class ReadmeHandlerMountsTest extends TestCase
         return $contracts['kinds'][$kind];
     }
 
-    /** @return array{0: string, 1: array<string, string>} The kind's request as JSON, and headers as WebhookSignature::headers() sets them. */
+    /** @return array{0: string, 1: array<string, string>} The kind's request as JSON, and the headers Siren signs it with. */
     private static function signed(string $kind): array
     {
-        $body = json_encode(self::contract($kind)['request'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        $t = time();
+        $request = self::signedContract($kind, self::secret());
 
-        return [$body, [
-            'Content-Type' => 'application/json',
-            'X-Siren-Event' => 'app.request',
-            'X-Siren-Timestamp' => (string) $t,
-            'X-Siren-Signature-V2' => 't=' . $t . ',v1=' . hash_hmac('sha256', $t . '.' . $body, self::secret()),
-        ]];
+        return [$request->rawBody, $request->headers];
     }
 
     /** The distribution resolver's function, as the README's sample writes it, on a handler. */
@@ -76,7 +70,7 @@ final class ReadmeHandlerMountsTest extends TestCase
 
     public function testThePsr15MountGivesSlimAHandlerThatAnswersATell(): void
     {
-        $siren = $this->mockSiren([]);
+        $siren = $this->mockSiren([], ['baseUrl' => self::FIXTURE_SIREN]);
         $seen = [];
         $answers = $siren->apps->requestHandler(self::secret())
             ->on('postConversionAction', 'tell-the-crm', function ($request) use (&$seen): void {
@@ -105,7 +99,7 @@ final class ReadmeHandlerMountsTest extends TestCase
 
     public function testTheLaravelRouteRepliesAtOnceAndHandsTheAnswerToTerminating(): void
     {
-        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted'])]);
+        $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted'])], ['baseUrl' => self::FIXTURE_SIREN]);
         $answers = self::splitByScore($siren->apps->requestHandler(self::secret()), $siren);
 
         eval(self::readme('mount-laravel'));
@@ -134,7 +128,7 @@ final class ReadmeHandlerMountsTest extends TestCase
         putenv('SIREN_SIGNING_SECRET=' . self::secret());
 
         try {
-            $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted'])]);
+            $siren = $this->mockSiren([self::jsonResponse(200, ['status' => 'accepted'])], ['baseUrl' => self::FIXTURE_SIREN]);
             $answers = null;
 
             eval(self::readme('handler-options'));
@@ -162,7 +156,7 @@ final class ReadmeHandlerMountsTest extends TestCase
         putenv('SIREN_SIGNING_SECRET=' . self::secret());
 
         try {
-            $siren = $this->mockSiren([]);
+            $siren = $this->mockSiren([], ['baseUrl' => self::FIXTURE_SIREN]);
             $answers = null;
 
             eval(self::readme('handler-options'));
@@ -186,7 +180,7 @@ final class ReadmeHandlerMountsTest extends TestCase
         putenv('SIREN_SIGNING_SECRET=' . self::secret());
 
         try {
-            $siren = $this->mockSiren([self::errorResponse(409, 'Siren dropped this request because the sale or visit it was about waited more than 24 hours for your app. This answer was not used.', 'app_request_dropped')]);
+            $siren = $this->mockSiren([self::errorResponse(409, 'Siren dropped this request because the sale or visit it was about waited more than 24 hours for your app. This answer was not used.', 'app_request_dropped')], ['baseUrl' => self::FIXTURE_SIREN]);
             $answers = null;
 
             eval(self::readme('on-error'));
