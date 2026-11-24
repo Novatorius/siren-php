@@ -394,8 +394,10 @@ PHP;
         $this->assertSame('Bearer ' . self::APP_KEY, $answer['authorization']);
         $this->assertSame($expected ?? self::contract($kind)['answer'], $answer['body']);
 
-        // The helpers a sample leaves to the app get the question's own values.
         $data = self::contract($kind)['request']['data'];
+        $this->assertNull(\Siren\Sdk\AppAnswerCheck::problem($kind, $data, $answer['body']), 'Siren takes the sample\'s answer, by its own checks.');
+
+        // The helpers a sample leaves to the app get the question's own values.
         $helpers = [
             'metricFilter' => [['isRefunded', [$data['sale']['transactionId'] ?? null]]],
             'engagementFilter' => [['isStaff', [$data['collaborator']['id'] ?? null, $data['opportunity']['customerId'] ?? null]]],

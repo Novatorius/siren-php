@@ -12,6 +12,15 @@ platform. You track the events that matter, such as sales, refunds and
 referred visits, and Siren credits collaborators, works out rewards and pays
 them.
 
+## How Siren talks to your app
+
+- **An app** is your own code that works with Siren. It holds a key, which it calls Siren with, and an address, where Siren sends it signed requests.
+- **The signing secret** belongs to the address. Siren signs every request with it, and the handler checks each one.
+- **A feature** is what the app adds to one of Siren's pickers. Its kind says what it does, such as `distributionResolver`, and its key names it in your app.
+- **A tell** lets the app know something happened, such as an approved conversion. The handler runs your function and replies 200.
+- **An ask** needs an answer, and the work it's about waits for it. The handler replies 200 at once, runs your function and posts what it returns.
+- **A custom event** goes the other way: the app sends it to Siren.
+
 ## What you can do
 
 This SDK is the official PHP client for the Siren API. With it you can:
@@ -128,9 +137,8 @@ one for each kind.
 `Siren\Sdk\Testing\AppRequests::make($kind, $key)` builds the request Siren
 would send, signed, with Siren's own sample question for the kind.
 `simulate()` runs the whole handler on it, from the signature check to the
-check an answer gets before it is posted, and gives back the reply and the
-answer without posting anything. This PHPUnit test runs a distribution
-resolver:
+checks Siren makes of an answer, and gives back the reply and the answer
+without posting anything. This PHPUnit test runs a distribution resolver:
 
 <!-- readme-test: try-it -->
 ```php
@@ -161,8 +169,13 @@ final class SplitByScoreTest extends TestCase
 ```
 
 `$result` also carries `headers`, `body`, and `error`, which holds what
-`onError` would have heard, such as a function that threw or an answer with
-no `outcome`. `make()` takes `data` for your own question, and `secret`,
+`onError` would have heard, such as a function that threw, one that returned
+nothing, or an answer with no `outcome`. `simulate()` also checks the answer
+for the kind as Siren does, such as a share for every metric of the question
+and no share above the pool. An answer Siren would refuse comes back as a
+`ValidationException` with code `app_answer_invalid` and Siren's own words,
+and `$result->answer` is null. Siren also refuses a collaborator who isn't in
+the organization or is in the trash, which only Siren can check. `make()` takes `data` for your own question, and `secret`,
 which defaults to `SIREN_SIGNING_SECRET`. `AppRequests::sampleData($kind)`
 gives the sample question alone. To try a running app, post the same
 request's `method`, `headers` and `rawBody` to its address with any HTTP
@@ -214,13 +227,20 @@ $answers = $siren->apps->requestHandler(options: [ // the secret, from SIREN_SIG
     'toleranceSeconds' => 300,                          // as verifyRequest(), 1 to 3600
     'runLater' => fn ($work) => app()->terminating($work), // where an ask's work runs after the reply
     'onError' => fn (\Throwable $error, ?object $about) => report($error), // default error_log()
+    'extraKinds' => ['payoutReview'],                   // kinds a newer Siren sends that on() should take
 ]);
 ```
 
 `onError` gets each failure the reply can't carry, with the `AppRequest` or
 `WebhookEvent` it came from: a function that threw, an answer that could not
 be sent, and Siren's refusal of one. The default writes one `error_log()`
-line.
+line. For an ask that failed after its 200, the line also says when Siren
+sends it again and how to resend it sooner, such as ``Siren sends it again
+after 16:58 UTC, when its answer window closes. Resend it sooner from Needs
+attention in Siren Cloud, or with `siren apps resend apr_9c60...`.``
+
+`extraKinds` lists kinds `on()` takes beyond the thirteen this SDK knows, for
+a kind a newer Siren sends before the SDK names it.
 
 RoadRunner, Swoole, Octane and FrankenPHP's worker mode keep one PHP worker
 running for many requests and run shutdown functions only when it stops. On
@@ -239,8 +259,15 @@ until the worker stops. With `runLater`, `answer()` hands the work to it and
 feature of a kind. A function for the key wins. Each function gets the
 `AppRequest`, whose `id`, `mode`, `item` (`kind`, `key` and `id`) and `data`
 hold what Siren sent. A tell's return value is not read. An ask's function
-returns the answer as an array, or `null` when the app will answer later with
-`apps->requests->answer()`.
+returns the answer as an array, or `$answers->later()` when the app will
+answer later with `apps->requests->answer()`. An ask's function that returns
+nothing is an error, which `onError` hears, and nothing is posted.
+
+`on()` takes the thirteen kinds Siren sends, `AppItemKind::SENT`, and refuses
+any other at once with an `InvalidArgumentException` that says what to write
+instead. A typo gets the kind it's closest to, a screen name such as
+`attributionModel` gets its kind, `incentiveResolver`, and a webhook event
+such as `conversion.approved` is sent to `onEvent()`.
 
 `onEvent($type, $fn)` takes a webhook event Siren sends to the same address,
 such as `conversion.approved`, as a `WebhookEvent`. The handler checks it by
@@ -256,6 +283,7 @@ its signature and time, as it checks an app request.
 | `X-Siren-Signature-V2` missing or wrong, `X-Siren-Timestamp` different from the signed time, or a time more than `toleranceSeconds` from the clock | 401 `{"error"}` with `verifyRequest()`'s words |
 | A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` naming the first field that fails, such as ``its `id` must be `apr_` followed by 32 hex characters`` |
 | A tell with a function | 200 `{}` once the function returns, or 500 when it throws, so Siren tries again about 1, 2, 4 and 8 minutes later |
+| When your function fails | A tell gets 500, and Siren tries again about 1, 2, 4 and 8 minutes later. An ask already got its 200, so Siren sends it again when its answer window closes, 60 minutes by default. Resend it sooner from Needs attention in Siren Cloud, or with `siren apps resend <id>`. `onError` hears why either way. |
 | An ask whose `answerUrl` is on another Siren than the client's `baseUrl` | 500 `{"error"}` naming both addresses and the `baseUrl` to set, and `onError` hears it. Nothing runs and nothing is posted. |
 | An ask with a function | 200 `{}` at once, then the function runs and the answer it returns is posted to the client's own `baseUrl` |
 | An `app.request` for a feature with no function | 404 `{"error": "No function handles distributionResolver split-by-score."}`, so Siren tries again and then shows the request under Needs attention |
@@ -265,7 +293,14 @@ its signature and time, as it checks an app request.
 Every reply is JSON with `Cache-Control: no-store`, and no reply holds the
 secret or the body. Siren waits 8 seconds for a reply. The handler keeps no
 state, and Siren may deliver one request twice, so a tell's function writes
-once by `$request->id`.
+once by `$request->id`. That id is the same on every send. `item['id']` names
+the feature and `deliveryId` changes on every send, so neither one serves.
+
+An ask's function can also run more than once for one request: on a repeat
+delivery, and again on each send after its answer window closes. Write once
+by `$request->id` there too. Siren takes the same answer again as a duplicate
+and refuses a different one with 409 `app_request_already_answered`, so return
+the same answer each time.
 
 ### Split a pool
 
@@ -284,20 +319,22 @@ sample question, a pool of 10000 with scores 30 and 20, it gives
 
 Each heading below is the name Siren Cloud's screens give the kind, with the
 kind's value, which `$request->item['kind']` carries and `AppItemKind` names.
-`AppFeatureKind` sorts the kinds into `TELLS` and `ASKS` and holds the shape
-of each question and answer as PHPStan types, for `@phpstan-import-type`:
+`AppItemKind` also sorts the kinds into `TELLS` and `ASKS`, gives each one's
+screen name in `NAMES`, and holds the shape of each question and answer as
+PHPStan types, for `@phpstan-import-type`:
 
 ```php
-/** @phpstan-import-type AppDistributionAnswer from \Siren\Sdk\AppFeatureKind */
+/** @phpstan-import-type AppDistributionAnswer from \Siren\Sdk\AppItemKind */
 ```
 
 Every amount in a question or an answer is the stored whole number, so 1500
 in US dollars is $15.00. Divide by 10 to the power of the currency's `scale`
 to show it. Each sample is the function for the handler above, and runs as
-written in this repository's tests. The SDK checks only what every answer
-needs, a plain array with a text `outcome` of at most 16384 bytes as JSON.
-Siren checks the rest and refuses an answer that doesn't fit with 422
-`app_answer_invalid` and the reason.
+written in this repository's tests. The handler checks only what every
+answer needs before it posts, a plain array with a text `outcome` of at most
+16384 bytes as JSON. Siren checks the rest and refuses an answer that doesn't
+fit with 422 `app_answer_invalid` and the reason. `simulate()` runs Siren's
+checks too, so a test finds such an answer first.
 
 How long Siren waits for an ask's answer before it sends the ask again is
 the feature's answer window, set in its settings, 60 minutes when none is
@@ -870,8 +907,10 @@ again, and goes to `onError`:
 | 401 | `AuthenticationException` | `app_answer_unauthorized` | The client's key is not the app's own. |
 | 403, 404 | `PermissionException`, `NotFoundException` | Siren's code | The key can't answer this request, or there is no such request. |
 
-When the function throws or no answer lands, Siren asks again after
-`answerBy`. To act on a refusal, read it in `onError`:
+When the function throws, returns nothing, or no answer lands, Siren asks
+again after `answerBy`, and the default `onError` line says when. Resend it
+sooner from Needs attention in Siren Cloud, or with `siren apps resend <id>`.
+To act on a refusal, read it in `onError`:
 
 <!-- readme-test: on-error -->
 ```php
@@ -1523,6 +1562,8 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `apps->verifyRequest($rawBody, $headers, $secret, $toleranceSeconds, $now)` | `siren.apps.verifyRequest(rawBody, headers, secret, options)` | none | none |
 | `apps->requests->answer($id, $answer)` | `siren.apps.requests.answer(id, answer)` | `POST /apps/requests/{id}/answer` | the app's key |
 | `apps->requestHandler($signingSecret, $options)`, with `on`, `onEvent`, `serve`, `psr15`, `answer` and `simulate`. The secret defaults to `SIREN_SIGNING_SECRET`. | `siren.apps.requestHandler(options)`, with `on`, `onEvent`, `handle`, `simulate` and its Node, Web and Fastify mounts | `POST /apps/requests/{id}/answer` for an ask's answer, to the client's `baseUrl` only | the app's key |
+| `$answers->later()`, which an ask's function returns to answer later. Returning nothing is an error. | `answers.later()` | none | none |
+| The `extraKinds` option, kinds `on()` takes beyond the thirteen Siren sends today. `on()` refuses any other kind. | The `extraKinds` option | none | none |
 | `Siren\Sdk\Testing\AppRequests::make($kind, $key, $options)`, `AppRequests::sampleData($kind)` | `appRequest(kind, key, options)`, `sampleData(kind)` from `@novatorius/siren/testing` | none | none |
 | `new Siren()` reads `SIREN_API_KEY` | `new Siren()` reads `SIREN_API_KEY` | none | none |
 | `Apps::splitPool($pool, $weights)` | `siren.apps.splitPool(pool, weights)` | none | none |

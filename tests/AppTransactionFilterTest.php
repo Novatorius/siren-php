@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Siren\Sdk\Tests;
 
 use ReflectionClass;
-use Siren\Sdk\AppFeatureKind;
 use Siren\Sdk\AppItemKind;
 use Siren\Sdk\AppRequest;
 
@@ -104,9 +103,9 @@ final class AppTransactionFilterTest extends TestCase
     public function testTheKindIsNamedInBothListsAsAnAsk(): void
     {
         $this->assertSame('transactionFilter', AppItemKind::TRANSACTION_FILTER);
-        $this->assertSame(AppItemKind::TRANSACTION_FILTER, AppFeatureKind::TRANSACTION_FILTER);
+        $this->assertSame('transactionFilter', AppItemKind::TRANSACTION_FILTER);
         $this->assertContains('transactionFilter', (new ReflectionClass(AppItemKind::class))->getConstants());
-        $this->assertContains('transactionFilter', AppFeatureKind::ASKS);
+        $this->assertContains('transactionFilter', AppItemKind::ASKS);
     }
 
     public function testTheReadmeSampleIncludesOnlyTheLineItems(): void

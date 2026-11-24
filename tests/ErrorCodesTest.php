@@ -55,6 +55,7 @@ final class ErrorCodesTest extends TestCase
             'PLAN_UNAVAILABLE' => 'plan_unavailable',
             'HOLD_LIMIT' => 'hold_limit',
             'APP_ANSWER_UNAUTHORIZED' => 'app_answer_unauthorized',
+            'APP_ANSWER_INVALID' => 'app_answer_invalid',
         ], array_filter((new \ReflectionClass(ErrorCode::class))->getConstants(), 'is_string'));
     }
 

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `$answers->later()` gives the value an ask's function returns when the app
+  will answer the request itself with `apps->requests->answer()`. The handler
+  then posts nothing and reports nothing.
+- `apps->requestHandler()` takes `extraKinds`, a list of kinds `on()` takes
+  beyond the thirteen the SDK knows, for a kind a newer Siren sends first.
+- `simulate()` checks an ask's answer for its kind as Siren does, ported from
+  each kind's `validate()` on Siren's feat/apps branch, such as a share for
+  every metric of the question, no share above the pool, whole currency
+  steps, and ids that were in the question. An answer Siren would refuse comes
+  back as `error`, a `ValidationException` with code `app_answer_invalid`
+  (`ErrorCode::APP_ANSWER_INVALID`) and Siren's own words. The live handler
+  posts as before and leaves those checks to Siren.
+- The default `onError` line for an ask that failed after its 200 says when
+  Siren sends it again, from `answerBy`, and how to resend it sooner: from
+  Needs attention in Siren Cloud or with `siren apps resend <id>`. A tell's
+  line says Siren sends it again in about a minute.
+- `AppItemKind::SENT` lists the thirteen kinds Siren sends requests for, and
+  `AppItemKind::NAMES` the name Siren Cloud's screens give each kind. A test
+  holds both equal to Siren's APP_KINDS.
+- The README opens with "How Siren talks to your app", the same six lines in
+  all three SDKs. Its reply table gains "When your function fails", and it
+  says an ask's function can run more than once for one request, so it writes
+  once by `$request->id` and returns the same answer each time. The
+  `AppRequest` docblock names `id` as the one id to dedupe on.
+
 - `Siren\Sdk\Testing\AppRequests::make($kind, $key, $options)` builds a
   request as Siren signs it, a `SignedRequest` with `method`, `headers` and
   `rawBody`, so a handler can be tried without Siren. Its question defaults to
@@ -39,14 +64,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any framework. Each answers 200 with `token`, `expiresIn` and `url`, 400 for
   an event outside `events` or one Siren refuses, and 502 when Siren can't be
   reached.
-- `AppFeatureKind::PAYOUT_METHOD` (`payoutMethod`) in `ASKS`, so the request
+- `AppItemKind::PAYOUT_METHOD` (`payoutMethod`) in `ASKS`, so the request
   handler answers a payout method's ask: `['outcome' => 'paid', 'reference'
   => ...]` or `['outcome' => 'failed', 'reason' => ...]`.
 - The PHPStan types `AppPayoutQuestion` (`payout` with `id`, `fulfillmentId`
   and `attempt`, `amount` with `value`, `units` and `currency`, and
   `collaborator` with `id`, `name` and an `email` that may be null, as Siren
   builds it), `AppPayoutPaidAnswer`, `AppPayoutFailedAnswer` and
-  `AppPayoutAnswer` in `AppFeatureKind`. The kind's docblock now gives that
+  `AppPayoutAnswer` in `AppItemKind`. The kind's docblock now gives that
   question, in place of a `payoutId`, `amount` and `currency` Siren never
   sent.
 - openapi.yaml describes `POST /apps/requests/{requestKey}/answer` with its
@@ -57,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /oauth/token` with the `client_credentials` grant an app's key
   trades for a server or browser token. `POST /event/{eventSlug}` names the
   app token it takes, as the new `appToken` security scheme.
-- `AppFeatureKind` holds, besides the types named below, the PHPStan types
+- `AppItemKind` holds, besides the types named below, the PHPStan types
   `AppCurrency`, `AppConversionTell`, `AppAllocationTell`,
   `AppDistributionQuestion`, `AppDistributionAnswer`, `AppRewardQuestion`,
   `AppRewardAnswer`, `AppMetricCalculationQuestion`,
@@ -69,21 +94,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AppRequestReply` the `status`, `headers`, `body` and `after` of
   `AppRequestHandler::answer()`.
 
-- `AppItemKind::TRANSACTION_FILTER` and `AppFeatureKind::TRANSACTION_FILTER`
+- `AppItemKind::TRANSACTION_FILTER`
   (`transactionFilter`), the feature kind a program or a distributor picks to
   let the app say which of a sale's own lines count. Siren's catalog calls it
   a transaction compiler. Siren asks it once per sale for each program or
   distributor that picks it, and a refund reuses the stored answer.
-  `AppFeatureKind` lists it in `ASKS` and holds the PHPStan types
+  `AppItemKind` lists it in `ASKS` and holds the PHPStan types
   `AppTransactionFilterQuestion`, `AppTransactionLine` and
   `AppTransactionFilterAnswer`, the ids of the lines to include. Siren refuses
   a line id the question lacks with 422 `app_answer_invalid`. The README shows
   the question and a handler that counts only `lineItem` lines.
-- `AppItemKind::COLLABORATOR_GROUP_STRUCTURE` and
-  `AppFeatureKind::COLLABORATOR_GROUP_STRUCTURE` (`collaboratorGroupStructure`),
+- `AppItemKind::COLLABORATOR_GROUP_STRUCTURE` (`collaboratorGroupStructure`),
   the feature kind a collaborator group picks to let the app give the group's
   shape. Siren asks it once per cascade trigger on the group, for a program or
-  a distributor. `AppFeatureKind` lists it in `ASKS` and holds the PHPStan
+  a distributor. `AppItemKind` lists it in `ASKS` and holds the PHPStan
   types `AppCollaboratorGroupStructureQuestion`,
   `AppCollaboratorGroupStructureDistributorQuestion`,
   `AppCollaboratorGroupStructureProgramQuestion` and
@@ -114,29 +138,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole steps of the pool's currency, rounded down so the sum never passes
   `pool.value`, and evenly when every weight is 0. It throws
   `InvalidArgumentException` for a negative, non-finite or non-number weight.
-- `AppItemKind::INCENTIVE_TYPE` and `AppFeatureKind::INCENTIVE_TYPE`
+- `AppItemKind::INCENTIVE_TYPE`
   (`incentiveType`), the kind a program picks as its incentive type to let the
   app decide which engagements each sale, lead or renewal converts and the
-  pool the program's resolver divides. `AppFeatureKind` holds its question and
+  pool the program's resolver divides. `AppItemKind` holds its question and
   answer as the PHPStan types `AppIncentiveTypeQuestion` and
   `AppIncentiveTypeAnswer`, `['outcome' => 'award', 'units' => ..., 'pool' =>
   ..., 'engagementIds' => [...]]` or `['outcome' => 'none']`, and the README
   shows the handler's sample for it.
-- `AppItemKind::ENGAGEMENT_CALCULATION` and `AppFeatureKind::ENGAGEMENT_CALCULATION`
-  (`engagementCalculation`), and `AppItemKind::ENGAGEMENT_FILTER` and
-  `AppFeatureKind::ENGAGEMENT_FILTER` (`engagementFilter`), the kinds a
+- `AppItemKind::ENGAGEMENT_CALCULATION`
+  (`engagementCalculation`), and `AppItemKind::ENGAGEMENT_FILTER` (`engagementFilter`), the kinds a
   program's engagement type and a program pick to let the app decide who
-  earns each engagement and whether it is made. `AppFeatureKind` holds their
+  earns each engagement and whether it is made. `AppItemKind` holds their
   questions and answers as the PHPStan types `AppEngagementCalculationQuestion`,
   `AppEngagementCalculationAnswer`, `AppEngagementFilterQuestion` and
   `AppEngagementFilterAnswer`, and the README shows the answer each takes.
-- `AppItemKind::PROGRAM_GROUP_SORTER` and `AppFeatureKind::PROGRAM_GROUP_SORTER`
+- `AppItemKind::PROGRAM_GROUP_SORTER`
   (`programGroupSorter`), the kind a program group picks as its structure to
-  let the app order its programs for each sale or lead. `AppFeatureKind`
+  let the app order its programs for each sale or lead. `AppItemKind`
   holds its question and answer as the PHPStan types `AppGroupOrderQuestion`
   and `AppGroupOrderAnswer`, `['outcome' => 'sorted', 'programIds' => [...]]`,
   and the README shows the handler's sample for it.
-- `AppFeatureKind` names the eleven kinds Siren sends requests for, with the
+- `AppItemKind` names the eleven kinds Siren sends requests for, with the
   same values as `AppItemKind`, and holds each kind's question and answer as
   PHPStan types.
 - `AppItemKind` names the kinds of feature an app can add, as an app
@@ -220,6 +243,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   32 hex characters".
 
 ### Breaking
+
+- `on()` refuses a kind Siren never sends with an `InvalidArgumentException`
+  that says what to write instead: the kind a typo is closest to, the kind
+  for a screen name such as `attributionModel`, the camelCase form of
+  `distribution_resolver`, `onEvent()` for a webhook event, `events->ingest()`
+  for `customEvent`, and `payoutMethod` for `fulfillmentMethod`. Before, such
+  a function registered and every request for it got 404.
+- An ask's function that returns nothing is an error, which `onError` hears
+  and `simulate()` returns, and nothing is posted. Return `$answers->later()`
+  to answer later. Before, null meant answer later and nothing was logged.
+- `AppFeatureKind` is gone. `AppItemKind` holds everything it held: `TELLS`,
+  `ASKS` and the PHPStan shapes. Import the shapes `from AppItemKind`.
 
 - The request handler answers an ask only when its `answerUrl` is on the same
   Siren as the client's `baseUrl`, by scheme, host and port. Siren Cloud's

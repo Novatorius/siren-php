@@ -379,10 +379,10 @@ final class AppRequestHandlerTest extends TestCase
         $this->assertSame([], $this->errors);
     }
 
-    public function testAnAskWhoseFunctionReturnsNothingPostsNothing(): void
+    public function testAnAskWhoseFunctionReturnsLaterPostsNothing(): void
     {
-        $handler = $this->handler()->on('incentiveResolver', static function (): void {
-        });
+        $handler = $this->handler();
+        $handler->on('incentiveResolver', static fn () => $handler->later());
         $body = self::body('incentiveResolver');
 
         $reply = $handler->answer('POST', $body, self::signed($body));

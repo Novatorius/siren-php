@@ -20,7 +20,7 @@ final class AppIncentiveResolverTest extends TestCase
 
     public function testTheKindsMatchTheValuesSirenStores(): void
     {
-        $values = array_values((new ReflectionClass(AppItemKind::class))->getConstants());
+        $values = array_values(array_filter((new ReflectionClass(AppItemKind::class))->getConstants(), 'is_string'));
         sort($values);
 
         $this->assertSame([

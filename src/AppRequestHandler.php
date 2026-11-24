@@ -6,8 +6,11 @@ namespace Siren\Sdk;
 
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
+use Siren\Sdk\Exception\ConflictException;
+use Siren\Sdk\Exception\ErrorCode;
 use Siren\Sdk\Exception\SignatureVerificationException;
 use Siren\Sdk\Exception\SirenException;
+use Siren\Sdk\Exception\ValidationException;
 use Siren\Sdk\Resources\AppRequests;
 use Siren\Sdk\Resources\Apps;
 use Siren\Sdk\Resources\Webhooks;
@@ -46,8 +49,9 @@ use Siren\Sdk\Testing\SignedRequest;
  * | Another event with a function from `onEvent` | 200 `{}` once it returns, or 500 when it throws |
  * | Another event with no function | 200 `{}` |
  *
- * An ask's function returns the answer as an array, or null when the app
- * answers later with `$siren->apps->requests->answer()`. The handler checks
+ * An ask's function returns the answer as an array, or {@see later()} when
+ * the app answers later with `$siren->apps->requests->answer()`. A function
+ * that returns nothing is an error, and `onError` hears it. The handler checks
  * the answer as `requests->answer()` does and posts it to
  * `POST /apps/requests/{id}/answer` with the client's own key. Unlike
  * `requests->answer()`, it sends it again after a lost connection, a 429 or
@@ -55,10 +59,13 @@ use Siren\Sdk\Testing\SignedRequest;
  * answer and Siren takes that again as a duplicate. A refusal, such as 422
  * `app_answer_invalid` or 409 `app_request_already_answered`, goes to
  * `onError` and is not sent again. When the function throws or nothing
- * lands, Siren asks again after `answerBy`.
+ * lands, Siren asks again after `answerBy`, and the default `onError` line
+ * says when and how to resend it sooner.
  *
- * The handler keeps no state. Siren may deliver one request twice, so a
- * function writes once by `$request->id`.
+ * The handler keeps no state. Siren may deliver one request twice, and sends
+ * an ask again each time its answer window closes with no answer, so a
+ * function writes once by `$request->id` and an ask's function returns the
+ * same answer each time.
  */
 final class AppRequestHandler
 {
@@ -93,15 +100,18 @@ final class AppRequestHandler
      */
     private const CLOUD_HOSTS = ['api.sirenaffiliates.com', 'app.sirenaffiliates.com'];
 
-    private const OPTIONS = ['toleranceSeconds', 'runLater', 'onError'];
+    private const OPTIONS = ['toleranceSeconds', 'runLater', 'onError', 'extraKinds'];
 
     private readonly int $tolerance;
 
     /** @var (callable(callable(): void): void)|null */
     private $runLater;
 
-    /** @var callable(\Throwable, AppRequest|WebhookEvent|null): void */
+    /** @var (callable(\Throwable, AppRequest|WebhookEvent|null): void)|null The caller's, or null for the default line. */
     private $onError;
+
+    /** @var array<string, true> The kinds {@see on()} takes: {@see AppItemKind::SENT} and `extraKinds`. */
+    private array $kinds;
 
     /** @var array<string, array<string, callable(AppRequest): mixed>> */
     private array $byKey = [];
@@ -163,9 +173,35 @@ final class AppRequestHandler
             throw new \InvalidArgumentException('apps->requestHandler() takes onError as a function of the error and the request or event, or null.');
         }
 
+        $extraKinds = $options['extraKinds'] ?? [];
+
+        if (!is_array($extraKinds) || !array_is_list($extraKinds)
+            || array_filter($extraKinds, static fn ($kind): bool => !is_string($kind) || $kind === '') !== []) {
+            throw new \InvalidArgumentException("apps->requestHandler() takes extraKinds as a list of kinds, such as ['payoutReview'].");
+        }
+
+        /** @var list<string> $extraKinds */
         $this->tolerance = $tolerance;
         $this->runLater = $runLater;
-        $this->onError = $onError ?? self::logError(...);
+        $this->onError = $onError;
+        $this->kinds = array_fill_keys(array_merge(AppItemKind::SENT, $extraKinds), true);
+    }
+
+    /**
+     * What an ask's function returns when the app will answer the request
+     * itself, later, with `$siren->apps->requests->answer()`. The handler
+     * then posts nothing and reports nothing.
+     *
+     * ```php
+     * $answers->on('payoutMethod', 'bank-transfer', function ($request) use ($answers, $queue) {
+     *     $queue->push($request->id, $request->data);
+     *     return $answers->later();
+     * });
+     * ```
+     */
+    public function later(): AppAnswerLater
+    {
+        return AppAnswerLater::instance();
     }
 
     /**
@@ -176,19 +212,28 @@ final class AppRequestHandler
      * The function gets the {@see AppRequest}. For a tell its return value
      * is not read. For an ask it returns the answer as an array, such as
      * `['outcome' => 'allocated', 'units' => 'USD', 'shares' => [...]]`, or
-     * null to answer later. {@see AppFeatureKind} names the kinds and the
-     * shape of each question and answer.
+     * {@see later()} to answer later. Returning nothing from an ask is an
+     * error. {@see AppItemKind} names the kinds and the shape of each
+     * question and answer.
+     *
+     * The kind must be one Siren sends, {@see AppItemKind::SENT}, or one of
+     * the handler's `extraKinds`. Any other kind is refused at once, with
+     * what to write instead, since Siren would never reach its function.
      *
      * @param string                                $kind The feature's kind, such as `distributionResolver`.
      * @param string|callable(AppRequest): mixed    $key  The feature's key, or the function for every key of the kind.
      * @param (callable(AppRequest): mixed)|null    $fn   The function, when `$key` names a key.
      *
-     * @throws \InvalidArgumentException For an empty kind or key, no function, or a second function for one feature.
+     * @throws \InvalidArgumentException For an empty or unknown kind, an empty key, no function, or a second function for one feature.
      */
     public function on(string $kind, string|callable $key, ?callable $fn = null): static
     {
         if ($kind === '') {
             throw new \InvalidArgumentException("apps->requestHandler()->on() needs the feature's kind, such as 'distributionResolver'.");
+        }
+
+        if (!isset($this->kinds[$kind])) {
+            throw new \InvalidArgumentException(self::unknownKind($kind));
         }
 
         if ($fn === null) {
@@ -483,7 +528,7 @@ final class AppRequestHandler
             try {
                 $fn($request);
             } catch (\Throwable $e) {
-                $this->report($e, $request, $trace);
+                $this->report($e, $request, $trace, 'Siren sends it again in about a minute.');
 
                 return self::reply(500, sprintf('The function for %s %s failed, so Siren will send the request again.', $kind, $key));
             }
@@ -531,31 +576,45 @@ final class AppRequestHandler
     }
 
     /**
-     * Runs an ask's function and posts the answer it returns.
+     * Runs an ask's function and posts the answer it returns. In a
+     * simulation it checks the answer as Siren would, with Siren's words,
+     * and posts nothing.
      *
      * @param callable(AppRequest): mixed $fn
      */
     private function work(callable $fn, AppRequest $request, ?\stdClass $trace = null): void
     {
+        $next = self::nextSend($request);
+
         try {
             $answer = $fn($request);
         } catch (\Throwable $e) {
-            $this->report($e, $request, $trace);
+            $this->report($e, $request, $trace, $next);
 
             return;
         }
 
+        if ($answer instanceof AppAnswerLater) {
+            return;
+        }
+
         if ($answer === null) {
+            $this->report(new \UnexpectedValueException(sprintf(
+                'The function for %s %s returned nothing. Return the answer, or return $answers->later() when you will answer with apps->requests->answer().',
+                $request->item['kind'],
+                $request->item['key'],
+            )), $request, $trace, $next);
+
             return;
         }
 
         if (!is_array($answer)) {
             $this->report(new \InvalidArgumentException(sprintf(
-                "The function for %s %s returns the answer as an array, such as ['outcome' => '...'], or null to answer later, and it returned %s.",
+                "The function for %s %s returns the answer as an array, such as ['outcome' => '...'], or \$answers->later() to answer later, and it returned %s.",
                 $request->item['kind'],
                 $request->item['key'],
                 get_debug_type($answer),
-            )), $request, $trace);
+            )), $request, $trace, $next);
 
             return;
         }
@@ -563,15 +622,87 @@ final class AppRequestHandler
         try {
             if ($trace !== null) {
                 $this->requests->check($request->id, $answer);
+                $problem = AppAnswerCheck::problem((string) $request->item['kind'], $request->data, $answer);
+
+                if ($problem !== null) {
+                    throw new ValidationException($problem, 422, ErrorCode::APP_ANSWER_INVALID);
+                }
+
                 $trace->answer = $answer;
 
                 return;
             }
 
             $this->requests->answerRetried($request->id, $answer);
+        } catch (ConflictException $e) {
+            // Siren took another answer or stopped waiting, so it sends nothing again.
+            $sendsAgain = !in_array($e->getErrorCode(), ['app_request_already_answered', 'app_request_dropped'], true);
+            $this->report($e, $request, $trace, $sendsAgain ? $next : null);
         } catch (\Throwable $e) {
-            $this->report($e, $request, $trace);
+            $this->report($e, $request, $trace, $next);
         }
+    }
+
+    /**
+     * What the default `onError` line adds for an ask that failed after its
+     * 200: Siren sends it again when its answer window closes, and a person
+     * can resend it sooner.
+     */
+    private static function nextSend(AppRequest $request): string
+    {
+        $answerBy = $request->answerBy === null ? false : strtotime($request->answerBy);
+        $when = $answerBy === false ? '' : ' after ' . gmdate('H:i', $answerBy) . ' UTC';
+
+        return sprintf(
+            'Siren sends it again%s, when its answer window closes. Resend it sooner from Needs attention in Siren Cloud, or with `siren apps resend %s`.',
+            $when,
+            $request->id,
+        );
+    }
+
+    /**
+     * Why `on()` refuses a kind Siren never sends, and what to write instead.
+     */
+    private static function unknownKind(string $kind): string
+    {
+        $folded = static fn (string $name): string => strtolower(str_replace(['_', '-', ' '], '', $name));
+        $given = $folded($kind);
+
+        if (str_contains($kind, '.')) {
+            return sprintf('%s is a webhook event. Register it with onEvent().', $kind);
+        }
+
+        if ($given === 'fulfillmentmethod') {
+            return sprintf('%s is the old name. Use %s.', $kind, AppItemKind::PAYOUT_METHOD);
+        }
+
+        if ($given === $folded(AppItemKind::CUSTOM_EVENT)) {
+            return 'Siren never sends a custom event. Your app sends one with events->ingest().';
+        }
+
+        foreach (AppItemKind::SENT as $known) {
+            if ($given === $folded($known)) {
+                return str_contains($kind, '_')
+                    ? sprintf('Kinds are camelCase, as Siren sends them: %s.', $known)
+                    : sprintf('%s is not a feature kind. Did you mean %s?', $kind, $known);
+            }
+        }
+
+        foreach (AppItemKind::SENT as $known) {
+            $name = AppItemKind::NAMES[$known];
+
+            if ($given === $folded($name)) {
+                return sprintf("%s%s kind is %s.", $name, str_ends_with($name, 's') ? "'" : "'s", $known);
+            }
+        }
+
+        foreach (AppItemKind::SENT as $known) {
+            if (levenshtein($kind, $known) <= 2) {
+                return sprintf('%s is not a feature kind. Did you mean %s?', $kind, $known);
+            }
+        }
+
+        return sprintf('%s is not a feature kind. The kinds are: %s.', $kind, implode(', ', AppItemKind::SENT));
     }
 
     /**
@@ -627,10 +758,19 @@ final class AppRequestHandler
         return [$scheme, strtolower($parts['host']), $parts['port'] ?? ($scheme === 'https' ? 443 : 80)];
     }
 
-    private function report(\Throwable $error, AppRequest|WebhookEvent|null $about, ?\stdClass $trace = null): void
+    /**
+     * @param string|null $next What happens next, which the default line adds.
+     */
+    private function report(\Throwable $error, AppRequest|WebhookEvent|null $about, ?\stdClass $trace = null, ?string $next = null): void
     {
         if ($trace !== null) {
             $trace->error ??= $error;
+
+            return;
+        }
+
+        if ($this->onError === null) {
+            self::logError($error, $about, $next);
 
             return;
         }
@@ -642,15 +782,20 @@ final class AppRequestHandler
         }
     }
 
-    private static function logError(\Throwable $error, AppRequest|WebhookEvent|null $about): void
+    private static function logError(\Throwable $error, AppRequest|WebhookEvent|null $about, ?string $next = null): void
     {
         $what = match (true) {
             $about instanceof AppRequest => sprintf(' for %s %s, request %s', $about->item['kind'], $about->item['key'], $about->id),
             $about instanceof WebhookEvent => ' for ' . $about->getType(),
             default => '',
         };
+        $message = rtrim($error->getMessage());
 
-        error_log(sprintf('Siren request handler%s: %s: %s', $what, get_class($error), $error->getMessage()));
+        if ($next !== null) {
+            $message .= (preg_match('/[.!?]$/', $message) === 1 ? ' ' : '. ') . $next;
+        }
+
+        error_log(sprintf('Siren request handler%s: %s: %s', $what, get_class($error), $message));
     }
 
     /**

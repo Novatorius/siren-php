@@ -140,6 +140,14 @@ final class ErrorCode
     public const APP_ANSWER_UNAUTHORIZED = 'app_answer_unauthorized';
 
     /**
+     * 422: the answer does not fit the request's kind, with Siren's reason as
+     * the message. Siren keeps nothing, so a corrected answer may follow. A
+     * {@see ValidationException}. `simulate()` gives the same code for an
+     * answer Siren would refuse.
+     */
+    public const APP_ANSWER_INVALID = 'app_answer_invalid';
+
+    /**
      * The 403 codes that mean Siren's policy refused the request, so
      * repeating it fails again. Each is a {@see PolicyException}.
      *

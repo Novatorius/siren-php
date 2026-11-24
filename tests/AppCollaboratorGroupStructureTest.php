@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Siren\Sdk\Tests;
 
 use ReflectionClass;
-use Siren\Sdk\AppFeatureKind;
 use Siren\Sdk\AppItemKind;
 use Siren\Sdk\AppRequest;
 
@@ -17,7 +16,7 @@ use Siren\Sdk\AppRequest;
  * (tests/Fixtures/apps-feature-contracts/requests.json), signed now with the
  * secret of tests/Fixtures/apps-exchange.
  *
- * @phpstan-import-type AppCollaboratorGroupStructureProgramQuestion from AppFeatureKind
+ * @phpstan-import-type AppCollaboratorGroupStructureProgramQuestion from AppItemKind
  */
 final class AppCollaboratorGroupStructureTest extends TestCase
 {
@@ -102,14 +101,14 @@ final class AppCollaboratorGroupStructureTest extends TestCase
     public function testTheKindIsNamedInBothListsAsAnAsk(): void
     {
         $this->assertSame('collaboratorGroupStructure', AppItemKind::COLLABORATOR_GROUP_STRUCTURE);
-        $this->assertSame(AppItemKind::COLLABORATOR_GROUP_STRUCTURE, AppFeatureKind::COLLABORATOR_GROUP_STRUCTURE);
+        $this->assertSame('collaboratorGroupStructure', AppItemKind::COLLABORATOR_GROUP_STRUCTURE);
         $this->assertContains('collaboratorGroupStructure', (new ReflectionClass(AppItemKind::class))->getConstants());
-        $this->assertContains('collaboratorGroupStructure', AppFeatureKind::ASKS);
+        $this->assertContains('collaboratorGroupStructure', AppItemKind::ASKS);
     }
 
     public function testTheFeatureKindTypesAProgramQuestionBesideTheDistributorOne(): void
     {
-        $source = (string) file_get_contents((string) (new ReflectionClass(AppFeatureKind::class))->getFileName());
+        $source = (string) file_get_contents((string) (new ReflectionClass(AppItemKind::class))->getFileName());
 
         $this->assertStringContainsString('@phpstan-type AppCollaboratorGroupStructureDistributorQuestion', $source);
         $this->assertStringContainsString('@phpstan-type AppCollaboratorGroupStructureProgramQuestion', $source);

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Siren\Sdk\Tests;
 
-use Siren\Sdk\AppFeatureKind;
 use Siren\Sdk\AppItemKind;
 
 /**
@@ -21,10 +20,10 @@ final class AppEngagementKindsTest extends TestCase
     {
         $this->assertSame('engagementCalculation', AppItemKind::ENGAGEMENT_CALCULATION);
         $this->assertSame('engagementFilter', AppItemKind::ENGAGEMENT_FILTER);
-        $this->assertSame(AppItemKind::ENGAGEMENT_CALCULATION, AppFeatureKind::ENGAGEMENT_CALCULATION);
-        $this->assertSame(AppItemKind::ENGAGEMENT_FILTER, AppFeatureKind::ENGAGEMENT_FILTER);
-        $this->assertContains(AppFeatureKind::ENGAGEMENT_CALCULATION, AppFeatureKind::ASKS);
-        $this->assertContains(AppFeatureKind::ENGAGEMENT_FILTER, AppFeatureKind::ASKS);
+        $this->assertSame('engagementCalculation', AppItemKind::ENGAGEMENT_CALCULATION);
+        $this->assertSame('engagementFilter', AppItemKind::ENGAGEMENT_FILTER);
+        $this->assertContains(AppItemKind::ENGAGEMENT_CALCULATION, AppItemKind::ASKS);
+        $this->assertContains(AppItemKind::ENGAGEMENT_FILTER, AppItemKind::ASKS);
     }
 
     /**
