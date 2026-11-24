@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `$siren->events->ingest($slug, $payload)` sends an app's custom event with a
+  short-lived token. With a client built from the app's key, the SDK trades
+  the key for a 20-minute token at `POST /oauth/token`, gets a new one when
+  fewer than two minutes are left and after a 401, and sends once more. It
+  keeps tokens in APCu when it is on, or in the PSR-16 cache passed as the new
+  `tokenCache` client option, or in memory with `tokenCache => false`. `sale`,
+  `refund` and `siteVisited` keep sending the key.
+- `$siren->events->browserToken($eventKey)` gets a `BrowserToken` that lets a
+  web page send one custom event for ten minutes from a domain the event
+  allows. `events->serveBrowserToken($options)` serves it from a plain PHP
+  file, `events->browserTokenHandler($options)` as a PSR-15
+  `BrowserTokenHandler`, and `BrowserTokenEndpoint::answer($body, $query)` in
+  any framework. Each answers 200 with `token`, `expiresIn` and `url`, 400 for
+  an event outside `events` or one Siren refuses, and 502 when Siren can't be
+  reached.
+- `AppFeatureKind::PAYOUT_METHOD` (`payoutMethod`) in `ASKS`, so the request
+  handler answers a payout method's ask: `['outcome' => 'paid', 'reference'
+  => ...]` or `['outcome' => 'failed', 'reason' => ...]`.
+- `AppFeatureKind` holds, besides the types named below, the PHPStan types
+  `AppCurrency`, `AppConversionTell`, `AppAllocationTell`,
+  `AppDistributionQuestion`, `AppDistributionAnswer`, `AppRewardQuestion`,
+  `AppRewardAnswer`, `AppMetricCalculationQuestion`,
+  `AppMetricCalculationAnswer`, `AppMetricFilterQuestion`,
+  `AppMetricFilterAnswer` and `AppEngagementCause`.
+- `AppRequest` holds a checked request (`id`, `mode`, `app`, `item`,
+  `createdAt`, `answerBy`, `answerUrl`, `data`, and `isAsk()`),
+  `AppAnswerReceipt` what Siren answered to a posted answer, and
+  `AppRequestReply` the `status`, `headers`, `body` and `after` of
+  `AppRequestHandler::answer()`.
+
 - `AppItemKind::TRANSACTION_FILTER` and `AppFeatureKind::TRANSACTION_FILTER`
   (`transactionFilter`), the feature kind a program or a distributor picks to
   let the app say which of a sale's own lines count. Siren's catalog calls it
@@ -134,6 +164,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GET /fulfillments/{id}`, `PUT /webhooks/{id}` and
   `GET /webhooks/{id}/deliveries`, with the `WebhookSubscriptionUpdate` and
   `WebhookDelivery` schemas.
+
+### Changed
+
+- The README leads with what the SDK can do and the request handler, with a
+  sample for plain PHP, PSR-15 frameworks such as Slim and Mezzio, and
+  Laravel. It gives each kind of app feature a section under the name Siren
+  Cloud's screens use, with its question, its answer and a handler sample,
+  then the payout method, custom events with short-lived tokens, checking and
+  answering by hand, and errors and retries. Every handler sample runs in the
+  tests, from the README's own text, against Siren's own request for its kind
+  (tests/Fixtures/apps-feature-contracts/requests.json, now with all
+  thirteen kinds Siren sends).
 
 ## [0.3.0] - 2026-10-19
 

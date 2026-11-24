@@ -109,6 +109,27 @@ function noteShare(...$args): void
 {
     file_put_contents(getenv('STUB_LOG'), json_encode(['noteShare', $args]) . "\n", FILE_APPEND | LOCK_EX);
 }
+
+function isRefunded(...$args): bool
+{
+    file_put_contents(getenv('STUB_LOG'), json_encode(['isRefunded', $args]) . "\n", FILE_APPEND | LOCK_EX);
+
+    return true;
+}
+
+function isStaff(...$args): bool
+{
+    file_put_contents(getenv('STUB_LOG'), json_encode(['isStaff', $args]) . "\n", FILE_APPEND | LOCK_EX);
+
+    return true;
+}
+
+function payOnce(...$args): array
+{
+    file_put_contents(getenv('STUB_LOG'), json_encode(['payOnce', $args]) . "\n", FILE_APPEND | LOCK_EX);
+
+    return ['ok' => true, 'id' => 'acme-ledger-5521'];
+}
 PHP;
 
     /** The same handler mounted as PSR-15, as a Slim app would, to run the shutdown path. */
@@ -168,6 +189,14 @@ PHP;
             'split-the-reward' => self::sample(self::readme('answer-incentive')),
             'pay-on-closed-deals' => self::sample(self::readme('answer-award')),
             'pick-the-program' => self::sample(self::readme('answer-group-order')),
+            'visit-score' => self::sample(self::readme('answer-metric-calculation')),
+            'refund-check' => self::sample(self::readme('answer-metric-filter')),
+            'plan-lines' => self::sample(self::readme('answer-transaction-filter')),
+            'visit-weight' => self::sample(self::readme('answer-engagement-calculation')),
+            'staff-check' => self::sample(self::readme('answer-engagement-filter')),
+            'team-tree' => self::sample(self::readme('answer-group-structure')),
+            'acme-ledger' => self::sample(self::readme('answer-payout')),
+            'by-hand' => self::readme('by-hand'),
             'psr15' => self::PSR15,
         ];
 
@@ -325,7 +354,13 @@ PHP;
         $this->assertSame([], self::lines(self::$sirenLog));
     }
 
-    /** @return array<string, array{string, string}> */
+    /**
+     * Each ask's sample, by its file and kind. The answer Siren must get is
+     * the fixture's, but for the two calculations, whose samples score only
+     * the collaborator who triggered it where the fixture's answer scores two.
+     *
+     * @return array<string, array{0: string, 1: string, 2?: array<string, mixed>}>
+     */
     public static function asks(): array
     {
         return [
@@ -333,12 +368,20 @@ PHP;
             'incentive resolver, section 5.4' => ['split-the-reward', 'incentiveResolver'],
             'incentive type' => ['pay-on-closed-deals', 'incentiveType'],
             'program group structure' => ['pick-the-program', 'programGroupSorter'],
+            'metric calculation, a visit scores 1' => ['visit-score', 'metricCalculation', ['outcome' => 'scores', 'results' => [['collaboratorId' => 42, 'score' => 1]]]],
+            'metric filter' => ['refund-check', 'metricFilter'],
+            'transaction filter' => ['plan-lines', 'transactionFilter'],
+            'engagement calculation, a known customer scores 10' => ['visit-weight', 'engagementCalculation', ['outcome' => 'engagements', 'results' => [['collaboratorId' => 42, 'score' => 10]]]],
+            'engagement filter' => ['staff-check', 'engagementFilter'],
+            'collaborator group structure' => ['team-tree', 'collaboratorGroupStructure'],
+            'payout method' => ['acme-ledger', 'payoutMethod'],
             'the distribution resolver mounted as PSR-15' => ['psr15', 'distributionResolver'],
         ];
     }
 
+    /** @param array<string, mixed>|null $expected */
     #[DataProvider('asks')]
-    public function testAnAskGets200AtOnceAndSirenGetsTheFixturesAnswer(string $file, string $kind): void
+    public function testAnAskGets200AtOnceAndSirenGetsTheFixturesAnswer(string $file, string $kind, ?array $expected = null): void
     {
         [$status, $body, $took] = self::send($file, $kind);
 
@@ -351,7 +394,38 @@ PHP;
         $this->assertNotNull($answer, 'The fake Siren got no answer.');
         $this->assertSame('POST', $answer['method']);
         $this->assertSame('Bearer ' . self::APP_KEY, $answer['authorization']);
-        $this->assertSame(self::contract($kind)['answer'], $answer['body']);
+        $this->assertSame($expected ?? self::contract($kind)['answer'], $answer['body']);
+
+        // The helpers a sample leaves to the app get the question's own values.
+        $data = self::contract($kind)['request']['data'];
+        $helpers = [
+            'metricFilter' => [['isRefunded', [$data['sale']['transactionId'] ?? null]]],
+            'engagementFilter' => [['isStaff', [$data['collaborator']['id'] ?? null, $data['opportunity']['customerId'] ?? null]]],
+            'payoutMethod' => [['payOnce', [$data['payout']['id'] ?? null, $data['collaborator'] ?? null, $data['amount'] ?? null]]],
+        ];
+        $this->assertSame($helpers[$kind] ?? [], self::lines(self::$stubLog));
+    }
+
+    public function testTheByHandSampleChecksTheRequestAndAnswersIt(): void
+    {
+        [$status] = self::send('by-hand', 'payoutMethod');
+
+        $this->assertSame(200, $status);
+        $answer = self::awaitAnswer(1.0);
+        $this->assertNotNull($answer, 'The by-hand sample answered before it replied.');
+        $this->assertSame('Bearer ' . self::APP_KEY, $answer['authorization']);
+        $this->assertSame(['outcome' => 'paid', 'reference' => 'TX-1'], $answer['body']);
+    }
+
+    public function testTheByHandSampleRefusesAnUnsignedRequest(): void
+    {
+        $response = (new Client(['http_errors' => false, 'timeout' => 10]))->post(self::$app . '/by-hand.php', [
+            'body' => json_encode(self::contract('payoutMethod')['request'], JSON_THROW_ON_ERROR),
+            'headers' => ['Content-Type' => 'application/json', 'X-Siren-Event' => 'app.request'],
+        ]);
+
+        $this->assertSame(500, $response->getStatusCode(), 'verifyRequest() throws, so plain PHP answers 500.');
+        $this->assertSame([], self::lines(self::$sirenLog));
     }
 
     public function testTheReadmeLeadsWithTheSamplesAsWritten(): void
@@ -372,11 +446,24 @@ PHP;
             $at[] = strpos($readme, "<!-- readme-test: {$name} -->");
         }
 
-        $section = strpos($readme, '### Answer Siren in a few lines');
-        $this->assertNotFalse($section);
-        $this->assertSame($at, array_values(array_filter($at, static fn($offset): bool => $offset > $section)), 'The samples sit in the section.');
-        $this->assertLessThan(strpos($readme, '#### What the handler replies'), max($at), 'The samples lead the section.');
-        $this->assertGreaterThan(strpos($readme, '### Check and answer by hand'), strpos($readme, "\$request = \$siren->apps->verifyRequest("), 'verifyRequest is under the low-level path.');
+        $handler = strpos($readme, "\n## Answer Siren in a few lines\n");
+        $kinds = strpos($readme, "\n## Feature kinds\n");
+        $payout = strpos($readme, "\n## Payout method (`payoutMethod`)\n");
+        $this->assertNotFalse($handler);
+        $this->assertNotFalse($kinds);
+        $this->assertNotFalse($payout);
+        $this->assertLessThan(strpos($readme, '### What the handler replies'), $at[0], 'The whole sample leads the handler section.');
+        $this->assertGreaterThan($handler, $at[0]);
+        $this->assertLessThan(strpos($readme, "\n## Quickstart\n"), $handler, 'The handler comes before the quickstart.');
+
+        foreach (['answer-allocation', 'answer-distribution', 'answer-incentive', 'answer-award', 'answer-group-order', 'answer-metric-calculation', 'answer-metric-filter', 'answer-transaction-filter', 'answer-engagement-calculation', 'answer-engagement-filter', 'answer-group-structure'] as $name) {
+            $offset = strpos($readme, "<!-- readme-test: {$name} -->");
+            $this->assertNotFalse($offset, $name);
+            $this->assertTrue($offset > $kinds && $offset < $payout, $name . ' sits under Feature kinds.');
+        }
+
+        $this->assertGreaterThan($payout, strpos($readme, '<!-- readme-test: answer-payout -->'));
+        $this->assertGreaterThan(strpos($readme, "\n## Check and answer by hand\n"), strpos($readme, "\$request = \$siren->apps->verifyRequest("), 'verifyRequest is under the low-level path.');
     }
 
     public function testABodyOverOneMebibyteGets413(): void

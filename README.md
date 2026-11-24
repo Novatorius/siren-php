@@ -1,6 +1,6 @@
 # Siren SDK for PHP
 
-Affiliate and incentive tracking for any commerce stack — record sales, verify signed webhooks, and reconcile your ledger in a few lines of PHP.
+Affiliate and incentive tracking for any commerce stack. Record sales, answer Siren from your own app, verify signed webhooks and reconcile your ledger in a few lines of PHP.
 
 [![Packagist Version](https://img.shields.io/packagist/v/siren/sdk.svg)](https://packagist.org/packages/siren/sdk)
 [![CI](https://github.com/Novatorius/siren-php/actions/workflows/ci.yml/badge.svg)](https://github.com/Novatorius/siren-php/actions/workflows/ci.yml)
@@ -14,14 +14,38 @@ platform. You track the events that matter — sales, refunds, referred visits �
 and Siren attributes them to collaborators, calculates rewards, and manages
 payouts.
 
-This SDK is the official PHP client for the Siren API. It lets you:
+## What you can do
 
-- Record commerce and tracking events (`sale`, `refund`, `siteVisited`, and custom event types)
-- Verify signed webhooks in a single, constant-time call
-- Manage webhook subscriptions, with an API key or a signed-in dashboard session's token, and API keys, with a session's token
-- Reconcile Siren's ledger (conversions, transactions, obligations, payouts) against your own, with an API key, a dashboard session's token or a connected site's token
-- Read and write the records a connector needs: collaborators and their tracking codes and program enrollments, mappings, programs, program groups, opportunities, transactions, conversions, engagements, distributors, custom currencies, store credit and its holds, shared settings, and collaborator groups
-- Run inside any host: bring your own HTTP client and your own OAuth access token
+This SDK is the official PHP client for the Siren API. With it you can:
+
+- Answer Siren from an app you host, in a few lines. One request handler
+  checks each signed request, runs the function you register for each
+  feature, replies, and posts an ask's answer. Mount it in plain PHP, Slim,
+  Mezzio, Laravel or any framework. See
+  [Answer Siren in a few lines](#answer-siren-in-a-few-lines).
+- Answer every kind of app feature, from post-conversion and post-allocation
+  actions to resolvers, filters, calculations, group structures and payout
+  methods, with PHPStan types for each question and answer. See
+  [Feature kinds](#feature-kinds) and [Payout method](#payout-method-payoutmethod).
+- Split a resolver's pool in whole currency steps with `apps->splitPool()`.
+- Send an app's custom events with short-lived tokens the SDK gets and keeps
+  fresh, and give a web page a browser token for one event. See
+  [Custom events with short-lived tokens](#custom-events-with-short-lived-tokens).
+- Check a request and answer it yourself with `apps->verifyRequest()` and
+  `apps->requests->answer()`. See [Check and answer by hand](#check-and-answer-by-hand).
+- Record commerce and tracking events (`sale`, `refund`, `siteVisited`, and custom event types).
+- Verify signed webhooks in a single, constant-time call.
+- Manage webhook subscriptions, with an API key or a signed-in dashboard
+  session's token, and API keys, with a session's token.
+- Reconcile Siren's ledger (conversions, transactions, obligations, payouts
+  and fulfillments) against your own, with an API key, a dashboard session's
+  token or a connected site's token.
+- Read and write the records a connector needs: collaborators and their
+  tracking codes and program enrollments, mappings, programs, program groups,
+  opportunities, transactions, conversions, engagements, distributors, custom
+  currencies, store credit and its holds, shared settings, and collaborator
+  groups.
+- Run inside any host: bring your own HTTP client and your own OAuth access token.
 
 The full API surface is described in the [OpenAPI spec](./openapi.yaml).
 
@@ -39,142 +63,503 @@ The full API surface is described in the [OpenAPI spec](./openapi.yaml).
 composer require siren/sdk
 ```
 
-## Quickstart
+## Answer Siren in a few lines
 
-### Record a sale
+A Siren app is a service you host that acts as part of Siren's engine. Each of
+its features joins one of Siren's pickers, and Siren sends the app's address a
+signed request whenever a record that picked the feature needs it. A tell
+says what happened and waits for a 2xx. An ask waits for an answer.
 
-Mint an API key in the Siren dashboard (Settings → API Keys) with the
-`event:*` scope, then:
+`$siren->apps->requestHandler()` answers those requests for you. Register a
+function for each feature by its kind and key, and mount the handler at the
+app's address. It checks Siren's signature, finds the function, replies, and
+for an ask posts the answer the function returns once the reply has gone.
+Make the client with the app's own key, since the handler posts answers with
+it, and pass the app's signing secret, which Siren showed once when it made
+the app's address.
 
+With no framework, put this in the file the app's address points at:
+
+<!-- readme-test: answer-tell -->
 ```php
+<?php
+require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
-$siren = new Siren(['apiKey' => 'sk_live_...']);
+$siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
 
-$result = $siren->events->sale([
-    'source'     => 'stripe',            // your commerce source
-    'externalId' => 'cs_test_a1b2c3',    // your order id — used to match refunds later
-    'total'      => 49.99,               // major units: 49.99 = $49.99
-    'trackingId' => 4021,                // opportunity id from the Siren tracking cookie
-    'currency'   => 'USD',               // optional, defaults to the organization's currency
-    'items'      => [                    // optional; omit to treat total as one line
-        ['name' => 'Pro Plan (annual)', 'amount' => 49.99, 'quantity' => 1],
-    ],
+$siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
+    ->on('postConversionAction', 'tell-the-crm', function ($request) {
+        // Siren may send it twice, so add it once, keyed by $request->id.
+        addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
+    })
+    ->serve();
+```
+
+`baseUrl` is your Siren Cloud's API address. `serve()` reads `php://input`
+and the headers, and for an ask it sends the reply, ends the response with
+`fastcgi_finish_request()` or `litespeed_finish_request()`, or with
+`Content-Length`, `Connection: close` and a flush on other servers, and then
+runs the function. Only the function changes from feature to feature, and
+[Feature kinds](#feature-kinds) gives one for each kind.
+
+### Mount it in a framework
+
+Build the handler once, as above, and keep it as `$answers` instead of calling
+`serve()`. Then mount it in one of these ways.
+
+Slim, Mezzio and any framework that routes to a PSR-15 handler take
+`psr15()`. It needs `psr/http-server-handler`, and runs an ask's work from a
+shutdown function once the framework has sent the response:
+
+<!-- readme-test: mount-psr15 -->
+```php
+$app->post('/siren', $answers->psr15());
+```
+
+Laravel, Symfony and any other framework take `answer($method, $rawBody,
+$headers)`. It returns an `AppRequestReply` with `status`, `headers`, `body`
+and `after`. Send the reply, then run `after` when it is not null:
+
+<!-- readme-test: mount-laravel -->
+```php
+Route::post('/siren', function (Illuminate\Http\Request $request) use ($answers) {
+    $reply = $answers->answer($request->method(), $request->getContent(), $request->headers->all());
+
+    if ($reply->after !== null) {
+        app()->terminating($reply->after);
+    }
+
+    return response($reply->body, $reply->status, $reply->headers);
+});
+```
+
+Pass the body exactly as it arrived, such as Laravel's `getContent()` or
+Symfony's `$request->getContent()`. A body a framework already decoded can't
+be checked, and gets a 500 that says so. Leave the route out of CSRF checks,
+since Siren signs the request instead.
+
+### Options
+
+<!-- readme-test: handler-options -->
+```php
+$answers = $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'), [
+    'toleranceSeconds' => 300,                          // as verifyRequest(), 1 to 3600
+    'runLater' => fn ($work) => app()->terminating($work), // where an ask's work runs after the reply
+    'onError' => fn (\Throwable $error, ?object $about) => report($error), // default error_log()
 ]);
-
-echo $result->getOpportunityId(); // read from the X-Siren-OID response header
-echo $result->getStatus();        // EventStatus::CREATED, RECORDED, DUPLICATE, UNATTRIBUTED or IGNORED
 ```
 
-Siren answers 202 instead of 200 when the organization's engine is paused,
-such as when it is over its usage threshold. The event is queued and runs
-once the engine resumes, so `$result->isQueued()` is true and the event must
-not be sent again.
+`onError` gets each failure the reply can't carry, with the `AppRequest` or
+`WebhookEvent` it came from: a function that threw, an answer that could not
+be sent, and Siren's refusal of one. The default writes one `error_log()`
+line.
 
-Refunds reverse a sale by `(externalId, source)`:
+RoadRunner, Swoole, Octane and FrankenPHP's worker mode keep one PHP worker
+running for many requests and run shutdown functions only when it stops. On
+those servers pass `runLater`, a function that runs the work once the
+response has gone, such as `fn ($work) => app()->terminating($work)` under
+Octane or `fn ($work) => \Swoole\Coroutine::create($work)` under Swoole. Under
+RoadRunner, keep the work in a list and run it after `$worker->respond()`.
+Without `runLater`, `psr15()` finds such a server where it can and answers an
+ask 500, with `onError` told to pass `runLater`, rather than hold the answer
+until the worker stops. With `runLater`, `answer()` hands the work to it and
+`after` is null.
+
+### Register functions
+
+`on($kind, $key, $fn)` registers one feature, and `on($kind, $fn)` every
+feature of a kind. A function for the key wins. Each function gets the
+`AppRequest`, whose `id`, `mode`, `item` (`kind`, `key` and `id`) and `data`
+hold what Siren sent. A tell's return value is not read. An ask's function
+returns the answer as an array, or `null` when the app will answer later with
+`apps->requests->answer()`.
+
+`onEvent($type, $fn)` takes a webhook event Siren sends to the same address,
+such as `conversion.approved`, as a `WebhookEvent`. The handler checks it by
+its signature and time, as it checks an app request.
+
+### What the handler replies
+
+| Request | Reply |
+|---------|-------|
+| Not a POST | 405 `{"error"}` |
+| A body over 1 MiB, more than Siren sends | 413 `{"error"}` |
+| A body a parser already read, so there are no bytes to check | 500 `{"error"}` that says to mount the handler before the JSON parser, or give the route a raw body. `onError` hears it too. |
+| `X-Siren-Signature-V2` missing or wrong, `X-Siren-Timestamp` different from the signed time, or a time more than `toleranceSeconds` from the clock | 401 `{"error"}` with `verifyRequest()`'s words |
+| A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
+| A tell with a function | 200 `{}` once the function returns, or 500 when it throws, so Siren tries again about 1, 2, 4 and 8 minutes later |
+| An ask with a function | 200 `{}` at once, then the function runs and the answer it returns is posted |
+| An `app.request` for a feature with no function | 404 `{"error": "No function handles distributionResolver split-by-score."}`, so Siren tries again and then shows the request under Needs attention |
+| Another `X-Siren-Event` with a function from `onEvent()` | 200 `{}` once it returns, or 500 when it throws |
+| Another `X-Siren-Event` with no function | 200 `{}` |
+
+Every reply is JSON with `Cache-Control: no-store`, and no reply holds the
+secret or the body. Siren waits 8 seconds for a reply. The handler keeps no
+state, and Siren may deliver one request twice, so a tell's function writes
+once by `$request->id`.
+
+### Split a pool
+
+`apps->splitPool($pool, $weights)` takes the question's `pool` and a weight
+by id, which `array_column($rows, 'score', 'metricId')` gives in one call. It
+answers an amount by id, each a whole number of the currency's step
+(`10 ** (scale - decimalPlaces)` in the stored unit, so 100 for yen at scale
+2), rounded down so the amounts never add up to more than `pool.value`. When
+every weight is 0, it splits the pool evenly. It throws
+`InvalidArgumentException` for a negative or non-finite weight, a weight that
+is not a number, and a pool with no whole `value` or no currency. On Siren's
+sample question, a pool of 10000 with scores 30 and 20, it gives
+`['41' => 6000, '43' => 4000]`.
+
+## Feature kinds
+
+Each heading below is the name Siren Cloud's screens give the kind, with the
+kind's value, which `$request->item['kind']` carries and `AppItemKind` names.
+`AppFeatureKind` sorts the kinds into `TELLS` and `ASKS` and holds the shape
+of each question and answer as PHPStan types, for `@phpstan-import-type`:
 
 ```php
-$siren->events->refund([
-    'source'     => 'stripe',
-    'externalId' => 'cs_test_a1b2c3',
-]);
+/** @phpstan-import-type AppDistributionAnswer from \Siren\Sdk\AppFeatureKind */
 ```
 
-### Verify a webhook
+Every amount in a question or an answer is the stored whole number, so 1500
+in US dollars is $15.00. Divide by 10 to the power of the currency's `scale`
+to show it. Each sample is the function for the handler above, and runs as
+written in this repository's tests. The SDK checks only what every answer
+needs, a plain array with a text `outcome` of at most 16384 bytes as JSON.
+Siren checks the rest and refuses an answer that doesn't fit with 422
+`app_answer_invalid` and the reason.
 
-Siren signs every delivery with `X-Siren-Signature: sha256=<hex hmac>` — an
-HMAC-SHA256 of the **raw request body** keyed by your subscription's signing
-secret. The body is the event's payload. Siren names the event in the
-`X-Siren-Event` header and the delivery in `X-Siren-Delivery`, which stays
-the same when a delivery is retried.
+How long Siren waits for an ask's answer before it sends the ask again is
+the feature's answer window, set in its settings, 60 minutes when none is
+set. See [Errors and retries](#errors-and-retries) for what happens when no
+answer comes.
 
-> ⚠️ **Pass the raw body bytes.** The HMAC is computed over the exact bytes
-> Siren sent. Read `php://input` directly — if you `json_decode` and re-encode
-> the payload, verification **will fail**.
+### Post-conversion action (`postConversionAction`)
 
+A tell. Siren sends it when a conversion is approved in a program that picks
+this action. A test sale's conversion is never sent. `data` is an
+`AppConversionTell`: the `conversion` (its id, type, status and the ids of its
+engagement, opportunity, collaborator, transaction and obligation), the
+`reward` it earned with its `value`, `units` and `currency`, or null, and the
+`program`'s id and name. Siren reads only the reply's status. The sample at
+the top of [Answer Siren in a few lines](#answer-siren-in-a-few-lines) is
+this kind's.
+
+### Post-allocation action (`postAllocationAction`)
+
+A tell. Siren sends it each time an allocation completes for a distributor
+that picks this action. `data` is an `AppAllocationTell`: the `allocation`
+(the distribution, the obligation and the collaborator it went to, its status,
+`value`, `units` and `currency`) and the `distributor`'s id and name.
+
+<!-- readme-test: answer-allocation -->
 ```php
-use Siren\Sdk\Siren;
-use Siren\Sdk\WebhookEventType;
-use Siren\Sdk\Exception\SignatureVerificationException;
-
-$siren = new Siren(['apiKey' => 'sk_live_...']);
-
-try {
-    $event = $siren->webhooks->constructEventFromHeaders(
-        file_get_contents('php://input'),
-        getallheaders(),
-        $signingSecret,
-    );
-} catch (SignatureVerificationException $e) {
-    http_response_code(400);
-    exit;
-}
-
-match ($event->getType()) {
-    WebhookEventType::CONVERSION_APPROVED => handleConversion($event->getData()),
-    WebhookEventType::PAYOUT_PAID         => handlePayout($event->getData()),
-    default                               => null,
-};
+    ->on('postAllocationAction', 'note-the-share', function ($request) {
+        // Siren may send it twice, so note it once, keyed by $request->id.
+        noteShare($request->id, $request->data['allocation']);
+    })
 ```
 
-`constructEvent($rawBody, $signature, $secret, $eventType, $deliveryId)`
-does the same with the three header values passed one by one. A
-delivery whose body is the bare payload is refused without `$eventType`,
-because only the `X-Siren-Event` header names its event.
+### Distribution resolver (`distributionResolver`)
 
-Create a subscription (the `signingSecret` is returned **once** — store it).
-An API key that holds `webhook-subscriptions:manage` can do this, and so can
-a signed-in dashboard session's access token:
+An ask. Siren asks it when a distribution closes for a distributor that picks
+this resolver, and pays no one until the answer. The question is an
+`AppDistributionQuestion`: the `distribution` and its period, the
+`distributor`, the `pool` (`value` is what this answer may hand out, `total`
+the whole pool and `paid` what collaborators already hold from it), and the
+`metrics`, each collaborator Siren would pay with their `metricId`, `score` and
+`triggerCount`. The answer is an `AppDistributionAnswer`: `outcome`
+`allocated`, the pool's `units`, and in `shares` every `metricId` with a whole
+amount of 0 or more. The shares may add up to less than `pool.value`, never
+more.
 
+<!-- readme-test: answer-distribution -->
 ```php
-$siren = new Siren(['apiKey' => 'sk_live_...']); // a key with ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE
-
-$subscription = $siren->webhooks->subscriptions->create([
-    'targetUrl' => 'https://example.com/webhooks/siren',
-    'events'    => [WebhookEventType::CONVERSION_APPROVED, WebhookEventType::PAYOUT_PAID],
-    // or [WebhookEventType::ALL] to subscribe to everything
-]);
-
-$secret = $subscription['signingSecret'];
-
-$siren->webhooks->subscriptions->events(); // the live catalog: [{event, category, label}, ...]
+    ->on('distributionResolver', 'split-by-score', fn ($request) => [
+        'outcome' => 'allocated',
+        'units' => $request->data['pool']['units'],
+        // Whole currency steps, never more than the pool, split evenly when every score is 0.
+        'shares' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['metrics'], 'score', 'metricId')),
+    ])
 ```
 
-### Check and change a subscription
+### Attribution model (`incentiveResolver`)
 
-`retrieve($id)` reads one subscription, never with its signing secret, and
-`deliveries($id)` reads its latest 50 deliveries, newest first. Each delivery
-carries the payload Siren sent, its status (`pending`, `delivered` or
-`failed`), the tries it took and the first 200 bytes of your endpoint's
-answer. Both take `webhook-subscriptions:read` or
-`webhook-subscriptions:manage`, and both retry as reads.
+An ask. Siren's code calls this an incentive resolver. Siren asks it when a
+sale, renewal or lead converts in a program that picks this model, and splits
+the program's reward among the collaborators it converted. The question is an
+`AppRewardQuestion`: `reason` (`sale`, or `refund` when a partial refund asks
+again about rewards already made), the `program`, the `conversionType`, the
+`transaction` (null for a lead), the reward `pool`, and the `conversions`,
+each with its engagement `score`. The answer is an `AppRewardAnswer`:
+`outcome` `rewards`, the pool's `units`, and in `rewards` every
+`conversionId` as text with a whole amount from 0 up to `pool.value`, or null
+for a collaborator who earns nothing. The rewards may add up to more than the
+pool.
 
-`update($id, $params)` changes the target URL, the events, the status or the
-description, and sends only the fields you give. Any other key throws
-`InvalidArgumentException` before sending. So does an update with no field
-that is not `null`, because Siren skips a `null` field and cannot apply an
-update with nothing to change. `test($id)` makes Siren send one
-signed `webhook.test` delivery now and answers what your endpoint did. Siren
-answers 200 either way, so read `delivered`. Both take
-`webhook-subscriptions:manage`, and each is sent once.
-
+<!-- readme-test: answer-incentive -->
 ```php
-$result = $siren->webhooks->subscriptions->test($subscription['id']);
-
-if (!$result['delivered']) {
-    $latest = $siren->webhooks->subscriptions->deliveries($subscription['id'])[0] ?? null;
-    error_log(sprintf('%s %s', $latest['httpStatusCode'] ?? '-', $latest['responseBody'] ?? ''));
-}
-
-// Stop deliveries while you fix the endpoint, then start them again.
-$siren->webhooks->subscriptions->update($subscription['id'], ['status' => WebhookSubscriptionStatus::PAUSED]);
-$siren->webhooks->subscriptions->update($subscription['id'], ['status' => WebhookSubscriptionStatus::ACTIVE]);
+    ->on('incentiveResolver', 'split-the-reward', fn ($request) => [
+        'outcome' => 'rewards',
+        'units' => $request->data['pool']['units'],
+        'rewards' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['conversions'], 'score', 'conversionId')),
+    ])
 ```
 
-Siren refuses a test for a paused subscription with a 409, raised as
-`ConflictException`. From one address it allows 20 tests an hour for one
-subscription and 60 in all, and answers more with a 429, raised as
-`RateLimitException`.
+### Incentive structure (`incentiveType`)
+
+An ask. Siren's code calls this an incentive type. Siren asks it when a sale,
+lead or renewal comes in for a program that picks this structure, for the
+conversions its `conversionTypes` setting lists. The question is an
+`AppIncentiveTypeQuestion`: `reason`, the `program` with its `units`, the
+`conversionType`, the `opportunity`, the `transaction` with its `total` and
+`lines` (null for a lead, which names its `binding` instead), and the
+`engagements` that could convert, at most 250. A refund's question also lists
+the award's `conversions`, and its answer changes only the pool. The answer
+is an `AppIncentiveTypeAnswer`: `outcome` `award` with the program's `units`,
+a `pool` of 0 or more and the `engagementIds` that convert, each once, or
+`['outcome' => 'none']`. The program's attribution model divides the pool.
+
+<!-- readme-test: answer-award -->
+```php
+    ->on('incentiveType', 'pay-on-closed-deals', function ($request) {
+        // A tenth of the sale, shared by every engagement. A lead earns nothing here.
+        $sale = $request->data['transaction'];
+        if (!$sale || $sale['units'] !== $request->data['program']['units']) {
+            return ['outcome' => 'none'];
+        }
+        return ['outcome' => 'award', 'units' => $sale['units'], 'pool' => intdiv($sale['total'], 10), 'engagementIds' => array_column($request->data['engagements'], 'engagementId')];
+    })
+```
+
+### Metric calculation (`metricCalculation`)
+
+An ask. Siren's catalog calls this a calculation strategy. Siren asks it each
+time a metric triggers for a distributor whose metric type picks this
+calculation. The metric scores nothing until the answer, and the distribution
+pays no one until then. The question is an `AppMetricCalculationQuestion`:
+the `distributor`, the `distribution` the scores land in, the `metricType`
+(such as `referredSiteVisit` or `awardedSale`), the
+`distributorMetricTypeId`, the `triggeringCollaborator`, the `opportunityId`,
+`points` (an amount a person entered, which replaces every score, or null),
+the `cause` (its own random `id`, and the `type` and `causeId` of what caused
+a trigger that can be taken back) and the `sale` behind a sale trigger, or
+null. The answer is an `AppMetricCalculationAnswer`: `outcome` `scores` and
+`results`, at most 50, each a `collaboratorId` and a whole `score` of 0 or
+more, with no collaborator twice. An empty list scores nobody.
+
+<!-- readme-test: answer-metric-calculation -->
+```php
+    ->on('metricCalculation', 'visit-score', fn ($request) => [
+        'outcome' => 'scores',
+        // Score the collaborator who triggered it, more for a sale.
+        'results' => [['collaboratorId' => $request->data['triggeringCollaborator']['id'], 'score' => $request->data['metricType'] === 'awardedSale' ? 10 : 1]],
+    ])
+```
+
+### Customer filter for distributors (`metricFilter`)
+
+An ask. Siren's code calls this a metric filter. Siren asks it each time a
+metric triggers for a distributor that picks this filter, after its built-in
+filters allow it. The question is an `AppMetricFilterQuestion`: the
+`distributor`, the `distribution`, the `collaborator` the metric would credit,
+the `metricType`, the `opportunityId`, `points`, the `cause` and the `sale`,
+as a metric calculation's. The answer is an `AppMetricFilterAnswer`:
+`['outcome' => 'allow']`, or `outcome` `suppress` with a plain text `reason`
+of 1 to 200 characters, which Siren notes on the distributor.
+
+<!-- readme-test: answer-metric-filter -->
+```php
+    ->on('metricFilter', 'refund-check', function ($request) {
+        // Suppress a sale the CRM knows was refunded. Allow everything else.
+        if ($request->data['sale'] && isRefunded($request->data['sale']['transactionId'])) {
+            return ['outcome' => 'suppress', 'reason' => 'The order was refunded within 30 days.'];
+        }
+        return ['outcome' => 'allow'];
+    })
+```
+
+### Transaction filter (`transactionFilter`)
+
+An ask. Siren's catalog calls this a transaction compiler. Siren asks it once
+per sale for each program or distributor that picks it, to learn which of the
+sale's own lines count. The question is an `AppTransactionFilterQuestion`:
+what the filter is `for` (a program or a distributor), the `transaction` with
+its `units` and `currency`, and the sale's `lines`. Each line is an
+`AppTransactionLine` with its `id`, its `type` (`lineItem`, `discount`, `fee`,
+`shipping` or `tax`), its `name`, a whole `quantity`, its unit `value` and a
+`productId` or null. `distribution` is null for a program, and for a
+distributor the period the sale's value lands in. `refundDistribution` is
+null, or the later period a refund came in while the ask was open. The answer
+is an `AppTransactionFilterAnswer`: `outcome` `filtered` and in `include` the
+ids of the lines that count, each at most once. An empty list includes
+nothing. When a record picks more than one filter, a line counts when any of
+them includes it. A refund reuses the stored answer, so Siren never sends
+refund lines.
+
+<!-- readme-test: answer-transaction-filter -->
+```php
+    ->on('transactionFilter', 'plan-lines', fn ($request) => [
+        'outcome' => 'filtered',
+        'include' => array_column(array_filter($request->data['lines'], fn ($line) => $line['type'] === 'lineItem'), 'id'),
+    ])
+```
+
+### Engagement calculation (`engagementCalculation`)
+
+An ask. Siren's catalog calls this a calculation strategy. Siren asks it each
+time an engagement triggers for a program whose engagement type picks this
+calculation, and makes no engagement until the answer. The question is an
+`AppEngagementCalculationQuestion`: the `program`, the `engagementType`, the
+`programEngagementTypeId`, the `args` a person gave that engagement type, the
+`opportunity` with the `customerId` Siren matched it to (or null), the
+`triggeringCollaborator` and the `cause`, whose `occurredAt` dates the
+engagements the answer makes. The answer is an
+`AppEngagementCalculationAnswer`: `outcome` `engagements` and `results`, who
+earns an engagement and its score, with the same limits as a metric
+calculation. An empty list makes no engagement.
+
+<!-- readme-test: answer-engagement-calculation -->
+```php
+    ->on('engagementCalculation', 'visit-weight', fn ($request) => [
+        'outcome' => 'engagements',
+        // Credit the collaborator who triggered it, more when Siren knows the customer.
+        'results' => [['collaboratorId' => $request->data['triggeringCollaborator']['id'], 'score' => $request->data['opportunity']['customerId'] ? 10 : 1]],
+    ])
+```
+
+### Customer filter for programs (`engagementFilter`)
+
+An ask. Siren's code calls this an engagement filter. Siren asks it each time
+an engagement triggers for a program that picks this filter, and makes no
+engagement until the answer. The question is an
+`AppEngagementFilterQuestion`: the `program`, the `collaborator` the
+engagement would credit, the `opportunity`, the `engagementType` and the
+`cause`. The answer is an `AppEngagementFilterAnswer`:
+`['outcome' => 'allow']`, or `outcome` `suppress` with a plain text `reason`
+of 1 to 200 characters, which Siren notes on the opportunity.
+
+<!-- readme-test: answer-engagement-filter -->
+```php
+    ->on('engagementFilter', 'staff-check', function ($request) {
+        // Suppress a visit from someone who works for the partner. Allow everything else.
+        if (isStaff($request->data['collaborator']['id'], $request->data['opportunity']['customerId'])) {
+            return ['outcome' => 'suppress', 'reason' => 'The visitor works for the partner.'];
+        }
+        return ['outcome' => 'allow'];
+    })
+```
+
+A sale on that program and opportunity waits for both engagement kinds'
+answers before it earns a reward. When a sale waits on the answer, the ask
+ends with that sale's wait, 24 hours after the sale reached Siren, which can
+be sooner than 24 hours after the ask.
+
+### Program group structure (`programGroupSorter`)
+
+An ask. Siren's catalog calls this a group sorter. Siren asks it when a sale
+or lead reaches a program group that picks this structure. No program in the
+group is awarded until the answer. A renewal doesn't ask, and goes to the
+program whose engagement is oldest. The question is an
+`AppGroupOrderQuestion`: the `group`, the `conversionType`, the
+`opportunity`, the `transaction` with its `total` (null for a lead), and the
+`programs` of the group that take the conversion, in the group's order, each
+with its active `engagements` on the opportunity, oldest first. The answer is
+an `AppGroupOrderAnswer`: `outcome` `sorted` and `programIds`, every program
+id of the question exactly once, in the order Siren tries them. The first
+program that converts wins the group.
+
+<!-- readme-test: answer-group-order -->
+```php
+    ->on('programGroupSorter', 'pick-the-program', function ($request) {
+        // Try the program whose best engagement scores highest first.
+        $best = fn ($program) => max([0, ...array_column($program['engagements'], 'score')]);
+        $programs = $request->data['programs'];
+        usort($programs, fn ($a, $b) => $best($b) <=> $best($a));
+        return ['outcome' => 'sorted', 'programIds' => array_column($programs, 'id')];
+    })
+```
+
+### Collaborator group structure (`collaboratorGroupStructure`)
+
+An ask. Siren asks it each time a cascade runs over a collaborator group that
+picks this structure, for a program (an engagement cascade) or a distributor
+(a metric cascade). The cascade credits nobody above or below until the
+answer. The question is an `AppCollaboratorGroupStructureQuestion`: the
+`group`, its `members` with each one's `collaboratorId`, `name`, `status` at
+the trigger, which Siren credits the member by, and `metadata`, what the
+cascade is `for`, the `triggeringCollaborator` and the `cause`. It also
+carries the fields of the trigger it interrupts. A distributor's ask carries
+a metric calculation's fields, typed as
+`AppCollaboratorGroupStructureDistributorQuestion`, and a program's carries an
+engagement calculation's, typed as
+`AppCollaboratorGroupStructureProgramQuestion`. The answer is an
+`AppCollaboratorGroupStructureAnswer`, a chain or a tree:
+
+- A chain, `['outcome' => 'structure', 'shape' => 'chain', 'order' => [63, 57, 42]]`,
+  lists every member's `collaboratorId` once in `order`, top first.
+- A tree, `['outcome' => 'structure', 'shape' => 'tree', 'parents' => ['42' => 57, '57' => 63, '63' => null]]`,
+  maps every member's `collaboratorId` as text to another member's id, or to
+  null for a top member, with no cycle.
+
+<!-- readme-test: answer-group-structure -->
+```php
+    ->on('collaboratorGroupStructure', 'team-tree', function ($request) {
+        // Top first, by the rank your CRM keeps on each member.
+        $members = $request->data['members'];
+        usort($members, fn ($a, $b) => $a['metadata']['rank'] <=> $b['metadata']['rank']);
+        return ['outcome' => 'structure', 'shape' => 'chain', 'order' => array_column($members, 'collaboratorId')];
+    })
+```
+
+## Payout method (`payoutMethod`)
+
+An ask. Siren asks it when it sends a payout in a currency whose
+autofulfiller picks this payout method, after payouts are made and when
+someone sends or retries one. The feature names the currencies it pays in,
+and the payout shows as processing until the answer. `data` holds:
+
+- `payout`: its `id`, the `fulfillmentId` it belongs to, and `attempt`, which
+  starts at 1 and rises when Siren asks again about the same payout, such as
+  after a failed answer and a retry.
+- `amount`: what to pay, its `value` as a stored whole number with its
+  `units` and `currency`.
+- `collaborator`: who to pay, their `id`, `name` and `email`, which is null
+  when they have none.
+
+```json
+{"payout": {"id": 88, "fulfillmentId": 31, "attempt": 1},
+ "amount": {"value": 2500, "units": "USD", "currency": {"id": "USD", "symbol": "$", "position": "before",
+            "name": "US Dollar", "scale": 2, "decimalPlaces": 2, "type": "monetary"}},
+ "collaborator": {"id": 42, "name": "Ana Ruiz", "email": "ana@example.com"}}
+```
+
+The answer is `['outcome' => 'paid', 'reference' => '...']`, with the
+payment's id in your own system of 1 to 191 characters, or
+`['outcome' => 'failed', 'reason' => '...']` of 1 to 500 characters, which
+marks the payout failed so someone can send it again. Pay each payout id at
+most once, and when Siren asks again about a payout you already paid, answer
+`paid` with the first reference.
+
+<!-- readme-test: answer-payout -->
+```php
+    ->on('payoutMethod', 'acme-ledger', function ($request) {
+        // Pay each payout once, keyed by its id, and answer with your reference.
+        $paid = payOnce($request->data['payout']['id'], $request->data['collaborator'], $request->data['amount']);
+        return $paid['ok'] ? ['outcome' => 'paid', 'reference' => $paid['id']] : ['outcome' => 'failed', 'reason' => $paid['error']];
+    })
+```
+
+When no answer comes within 24 hours of the first ask, Siren marks the payout
+failed, with words that tell the merchant to check with your app whether it
+paid before sending it again.
+
+## Custom events with short-lived tokens
+
+An app can send Siren events of its own, which programs and distributors can
+credit. Add the event to the app in Siren first.
 
 ### Send an app's custom event
 
@@ -317,226 +702,21 @@ credit unless you check it on your server.
 
 The [examples](examples) folder holds each of these as a file.
 
-### Answer Siren in a few lines
+## Check and answer by hand
 
-An app's features get requests from Siren at the app's address. Register a
-function for each feature and the handler does the rest: it checks Siren's
-signature, finds the function by the feature's kind and key, replies, and
-posts an ask's answer once the reply has gone. Make the client with the app's
-own key, since the handler posts answers with it.
+`apps->verifyRequest()` and `apps->requests->answer()` are the calls under
+the handler, for an app that queues the work or answers after a person
+decides. Check a request with `verifyRequest()`, then answer an ask with
+`requests->answer()`, using a client made with the app's own key. This
+payout method answers every payout it is asked about:
 
-An action after a conversion, a tell:
-
-<!-- readme-test: answer-tell -->
+<!-- readme-test: by-hand -->
 ```php
 <?php
 require 'vendor/autoload.php';
 use Siren\Sdk\Siren;
 
 $siren = new Siren(['apiKey' => getenv('SIREN_API_KEY'), 'baseUrl' => 'https://cloud.example.com/siren/v1']);
-
-$siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
-    ->on('postConversionAction', 'tell-the-crm', function ($request) {
-        // Siren may send it twice, so add it once, keyed by $request->id.
-        addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
-    })
-    ->serve();
-```
-
-For another feature, only the function changes. An action after an
-allocation, also a tell:
-
-<!-- readme-test: answer-allocation -->
-```php
-    ->on('postAllocationAction', 'note-the-share', function ($request) {
-        // Siren may send it twice, so note it once, keyed by $request->id.
-        noteShare($request->id, $request->data['allocation']);
-    })
-```
-
-A distribution resolver, an ask. The function returns the answer, and the
-handler posts it:
-
-<!-- readme-test: answer-distribution -->
-```php
-    ->on('distributionResolver', 'split-by-score', fn ($request) => [
-        'outcome' => 'allocated',
-        'units' => $request->data['pool']['units'],
-        // Whole currency steps, never more than the pool, split evenly when every score is 0.
-        'shares' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['metrics'], 'score', 'metricId')),
-    ])
-```
-
-An incentive resolver, also an ask:
-
-<!-- readme-test: answer-incentive -->
-```php
-    ->on('incentiveResolver', 'split-the-reward', fn ($request) => [
-        'outcome' => 'rewards',
-        'units' => $request->data['pool']['units'],
-        'rewards' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['conversions'], 'score', 'conversionId')),
-    ])
-```
-
-An incentive type, which chooses the engagements that convert and the pool the
-program's resolver divides, or answers `none`:
-
-<!-- readme-test: answer-award -->
-```php
-    ->on('incentiveType', 'pay-on-closed-deals', function ($request) {
-        // A tenth of the sale, shared by every engagement. A lead earns nothing here.
-        $sale = $request->data['transaction'];
-        if (!$sale || $sale['units'] !== $request->data['program']['units']) {
-            return ['outcome' => 'none'];
-        }
-        return ['outcome' => 'award', 'units' => $sale['units'], 'pool' => intdiv($sale['total'], 10), 'engagementIds' => array_column($request->data['engagements'], 'engagementId')];
-    })
-```
-
-A program group structure, which answers every program of the group once, in
-the order Siren tries them:
-
-<!-- readme-test: answer-group-order -->
-```php
-    ->on('programGroupSorter', 'pick-the-program', function ($request) {
-        // Try the program whose best engagement scores highest first.
-        $best = fn ($program) => max([0, ...array_column($program['engagements'], 'score')]);
-        $programs = $request->data['programs'];
-        usort($programs, fn ($a, $b) => $best($b) <=> $best($a));
-        return ['outcome' => 'sorted', 'programIds' => array_column($programs, 'id')];
-    })
-```
-
-A transaction filter, also an ask, that counts only the sale's `lineItem`
-lines:
-
-<!-- readme-test: answer-transaction-filter -->
-```php
-    ->on('transactionFilter', 'plan-lines', fn ($request) => [
-        'outcome' => 'filtered',
-        'include' => array_column(array_filter($request->data['lines'], fn ($line) => $line['type'] === 'lineItem'), 'id'),
-    ])
-```
-
-`apps->splitPool($pool, $weights)` takes the question's `pool` and a weight
-by id, which `array_column($rows, 'score', 'metricId')` gives in one call. It
-answers an amount by id, each a whole number of the currency's step
-(`10 ** (scale - decimalPlaces)` in the stored unit, so 100 for yen at scale
-2), rounded down so the amounts never add up to more than `pool.value`. When
-every weight is 0, it splits the pool evenly. It throws
-`InvalidArgumentException` for a negative or non-finite weight, a weight that
-is not a number, and a pool with no whole `value` or no currency.
-
-`AppFeatureKind` names the kinds Siren sends requests for, with the same
-names and values as `AppItemKind`, and sorts them into `TELLS` and `ASKS`. It
-holds the shape of each kind's question and answer as PHPStan types, such as
-`AppDistributionQuestion`, `AppRewardAnswer`, `AppMetricFilterAnswer`,
-`AppTransactionFilterAnswer` and `AppCollaboratorGroupStructureAnswer`, for `@phpstan-import-type`.
-
-#### What the handler replies
-
-| Request | Reply |
-|---------|-------|
-| Not a POST | 405 `{"error"}` |
-| A body over 1 MiB, more than Siren sends | 413 `{"error"}` |
-| A body a parser already read, so there are no bytes to check | 500 `{"error"}` that says to mount the handler before the JSON parser, or give the route a raw body. `onError` hears it too. |
-| `X-Siren-Signature-V2` missing or wrong, `X-Siren-Timestamp` different from the signed time, or a time more than `toleranceSeconds` from the clock | 401 `{"error"}` with `verifyRequest()`'s words |
-| A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
-| A tell with a function | 200 `{}` once the function returns, or 500 when it throws, so Siren tries again about 1, 2, 4 and 8 minutes later |
-| An ask with a function | 200 `{}` at once, then the function runs and the answer it returns is posted |
-| An `app.request` for a feature with no function | 404 `{"error": "No function handles distributionResolver split-by-score."}`, so Siren tries again and then shows the request under Needs attention |
-| Another `X-Siren-Event` with a function from `onEvent()` | 200 `{}` once it returns, or 500 when it throws |
-| Another `X-Siren-Event` with no function | 200 `{}` |
-
-Every reply is JSON with `Cache-Control: no-store`, and no reply holds the
-secret or the body.
-
-An ask's function returns the answer as an array, or `null` when the app will
-answer later with `apps->requests->answer()`. The handler checks the answer
-as `requests->answer()` does and posts it to `POST /apps/requests/{id}/answer`
-with the client's key. Unlike `requests->answer()`, it sends the answer again
-after a lost connection, a 429 or a 5xx, inside the client's `maxRetries`,
-since it sends the very same answer and Siren takes that again as a
-duplicate. A refusal, such as 422 `app_answer_invalid` or 409
-`app_request_already_answered`, goes to `onError` and is not sent again. When
-the function throws or no answer lands, Siren asks again after `answerBy`,
-three sends in all.
-
-`on($kind, $key, $fn)` registers one feature, and `on($kind, $fn)` every
-feature of a kind. A function for the key wins. `onEvent($type, $fn)` takes a
-webhook event Siren sends to the same address, such as
-`conversion.approved`, as a `WebhookEvent`.
-
-#### Options
-
-```php
-$answers = $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'), [
-    'toleranceSeconds' => 300,                          // as verifyRequest(), 1 to 3600
-    'runLater' => fn ($work) => app()->terminating($work), // where an ask's work runs after the reply
-    'onError' => fn (\Throwable $error, ?object $about) => report($error), // default error_log()
-]);
-```
-
-`onError` gets each failure the reply can't carry, with the `AppRequest` or
-`WebhookEvent` it came from: a function that threw, an answer that could not
-be sent, and Siren's refusal of one.
-
-#### Mount it
-
-`serve()` answers the current plain PHP request from `php://input`. For an
-ask, it sends the reply, ends the response with `fastcgi_finish_request()` or
-`litespeed_finish_request()`, or with `Content-Length`, `Connection: close`
-and a flush on other servers, and then runs the function.
-
-`psr15()` gives a PSR-15 request handler for Slim, Mezzio and any framework
-that routes to one. It needs `psr/http-server-handler`, and runs an ask's
-work from a shutdown function once the framework has sent the response.
-
-```php
-$app->post('/siren', $answers->psr15());
-```
-
-RoadRunner, Swoole, Octane and FrankenPHP's worker mode keep one PHP worker
-running for many requests and run shutdown functions only when it stops, so
-on those servers pass `runLater`, a function that runs the work once the
-response has gone:
-
-```php
-$answers = $siren->apps->requestHandler($secret, ['runLater' => fn ($work) => app()->terminating($work)]); // Octane
-```
-
-Under Swoole, `fn ($work) => \Swoole\Coroutine::create($work)` does it. Under
-RoadRunner, keep the work in a list and run it after `$worker->respond()`.
-Without `runLater`, `psr15()` finds such a server where it can and answers an
-ask 500, with `onError` told to pass `runLater`, rather than hold the answer
-until the worker stops.
-
-`answer($method, $rawBody, $headers)` answers one request in any other
-framework, and returns an `AppRequestReply` with `status`, `headers`, `body`
-and `after`. Send the reply, then run `after` when it is not null. With the
-`runLater` option, the work goes to `runLater` and `after` is null.
-
-```php
-Route::post('/siren', function (Illuminate\Http\Request $request) use ($answers) {
-    $reply = $answers->answer($request->method(), $request->getContent(), $request->headers->all());
-
-    if ($reply->after !== null) {
-        app()->terminating($reply->after);
-    }
-
-    return response($reply->body, $reply->status, $reply->headers);
-});
-```
-
-### Check and answer by hand
-
-`apps->verifyRequest()` and `apps->requests->answer()` are the calls under
-the handler, for an app that queues the work or answers after a person
-decides. Check a request with `verifyRequest()`, then answer an ask with
-`requests->answer()`, using a client made with the app's own key.
-
-```php
-$siren = new Siren\Sdk\Siren(['apiKey' => getenv('SIREN_API_KEY')]);
 
 $request = $siren->apps->verifyRequest(
     file_get_contents('php://input'),
@@ -549,6 +729,9 @@ if ($request->isAsk()) {
 }
 ```
 
+Reply 200 within Siren's 8 seconds, and answer an ask by its `answerBy`. A
+real app replies first and answers later, as the handler does.
+
 `verifyRequest()` reads nothing over the network. It checks, in this order,
 that `X-Siren-Event` is `app.request` when present, that
 `X-Siren-Signature-V2` (`t=<seconds>,v1=<hex>`) signs `"{t}."` and the raw
@@ -559,198 +742,218 @@ body is an app request of version 1. Each failure throws
 received. Siren may send one request more than once, so drop a repeat by
 `$request->id`.
 
-`answer()` sends `POST /apps/requests/{id}/answer` once and never retries it.
-It throws `InvalidArgumentException` before sending for an id that is not a
-request key, an answer that is a list, one with no text `outcome`, and one
-over 16384 bytes as JSON. A different second answer throws
-`ConflictException` with code `app_request_already_answered`, and the first
-answer stands. When Siren takes no answer from the key,
-`AuthenticationException` carries `ErrorCode::APP_ANSWER_UNAUTHORIZED`.
-
-`AppItemKind` names each kind as `$request->item['kind']` carries it. The SDK
-checks only what every answer needs, so Siren checks the rest of each kind's
-answer and refuses one that doesn't fit with 422. A metric calculation
-(`AppItemKind::METRIC_CALCULATION`) scores a metric for a distributor and
-answers a score for each collaborator. Siren takes at most 50 results, each
-collaborator once and each in the organization and not in the trash, and each
-score a whole number of 0 or more. An empty list scores nobody. A metric
-filter (`AppItemKind::METRIC_FILTER`) answers whether one collaborator's
-metric counts: allow it, or suppress it with a plain text reason of 1 to 200
-characters.
-
-An incentive resolver (`AppItemKind::INCENTIVE_RESOLVER`) splits a program's
-reward among the collaborators a sale, renewal or lead converted. Its question holds the
-`program`, the `conversionType`, the `transaction` (null for a lead), the
-reward `pool` as a stored whole number, and the `conversions`, each with its
-engagement `score`. `reason` is `sale`, or `refund` when a partial refund asks
-again about rewards already made. The answer gives the pool's `units`, and in
-`rewards` every `conversionId` of the question as text, each a whole number of
-0 or more or null for a collaborator who earns nothing. The rewards may add up
-to more than the pool.
-
-An incentive type (`AppItemKind::INCENTIVE_TYPE`) decides a program's award
-for one sale, lead or renewal, for the conversions its `conversionTypes`
-setting lists. Its question holds the `program` with its `units`, the
-`conversionType`, the `opportunity`, the `transaction` (null for a lead, which
-names its `binding` instead) with its `total` and `lines` as stored whole
-numbers, and the `engagements` the program holds on the opportunity. The answer
-gives the program's `units`, a `pool` of 0 or more and `engagementIds`, the
-question's engagements that convert, each once. The program's resolver divides
-the pool among them. `['outcome' => 'none']` awards nothing. A partial refund
-of an award already made asks again with `reason` `refund` and the award's
-`conversions`, and its answer changes only the pool. The program awards
-nothing until the answer, 24 hours from the first ask at most.
-
-A program group structure (`AppItemKind::PROGRAM_GROUP_SORTER`) orders a
-program group's programs for one sale or lead. Its question holds the `group`,
-the `conversionType`, the `opportunity`, the `transaction` (null for a lead)
-with its `total` as a stored whole number, and the `programs` of the group
-that take the conversion, in the group's order, each with its active
-`engagements` on the opportunity, oldest first. The answer gives
-`programIds`, every program id of the question exactly once, in the order
-Siren tries them. The first program that converts wins the group. Nothing in
-the group is awarded until the answer, 24 hours from the sale at most, and
-Siren asks about each sale when it happens. A renewal doesn't ask. It goes to
-the program in the group whose engagement is oldest.
-
-The rewards wait for the answer, at most 24 hours from when the sale's reward
-began to wait, or from the refund for a refund's ask. Then Siren stops waiting:
-a sale's collaborators get no reward, and a
-refund cuts the rewards already made by the share refunded. An answer after
-that throws `ConflictException` with code `app_request_dropped`.
-
-An engagement calculation (`AppItemKind::ENGAGEMENT_CALCULATION`) is asked
-each time an engagement triggers for a program whose engagement type picks
-it. Its question holds the `program`, the `engagementType`, the `args` a
-person gave that engagement type, the `opportunity` with the `customerId`
-Siren matched it to (or null), the `triggeringCollaborator` and the `cause`,
-whose `occurredAt` dates the engagements the answer makes. It answers who
-earns an engagement and its score, with the same limits as a metric
-calculation. An empty list makes no engagement. An engagement filter
-(`AppItemKind::ENGAGEMENT_FILTER`) answers whether an engagement may be made
-for the `collaborator` it names: allow it, or suppress it with a plain text
-reason of 1 to 200 characters, which Siren notes on the opportunity. Siren
-makes no engagement until the answer, and a sale on that program and
-opportunity waits for it. Siren waits at most 24 hours from when it asked.
-When a sale waits on the answer, the ask ends with that sale's wait, 24 hours
-after the sale reached Siren, which can be sooner, even for a calculation a
-filter's allow asked later. Then the trigger makes no engagement and the sales
-award without it.
-
-A transaction filter (`AppItemKind::TRANSACTION_FILTER`) says which of a
-sale's own lines count. Siren's catalog calls it a transaction compiler.
-Siren asks it once per sale for each program or distributor that picks it.
-Its question names what the filter is `for`, the `transaction` with its
-`units` and `currency`, and the sale's `lines`. Each line has its `id`, its
-`type` (`lineItem`, `discount`, `fee`, `shipping` or `tax`), its `name`, a
-whole `quantity`, its unit `value` as a stored whole number in the
-transaction's units, and a `productId` or null. `distribution` is null for a
-program, and for a distributor the period the sale's value lands in.
-`refundDistribution` is null, or the later period a refund came in while the
-ask was open:
+The request Siren signs is this envelope, with the kind's question in `data`.
+`answerBy` and `answerUrl` appear only on an ask:
 
 ```json
-{"for": {"type": "program", "id": 3, "name": "Partner program"},
- "transaction": {"id": 3307, "units": "USD", "currency": {"id": "USD", "symbol": "$", "position": "before",
-                 "name": "US Dollar", "scale": 2, "decimalPlaces": 2, "type": "monetary"}},
- "lines": [{"id": 5501, "type": "lineItem", "name": "Annual plan", "quantity": 1, "value": 12000, "productId": "prod_annual"},
-           {"id": 5502, "type": "shipping", "name": "Shipping", "quantity": 1, "value": 800, "productId": null}],
- "distribution": null, "refundDistribution": null}
+{"version": 1, "id": "apr_9c60190a4501399d0ae55f041c237b39", "type": "app.request", "mode": "ask",
+ "app": "acme-crm", "item": {"kind": "distributionResolver", "key": "split-by-score", "id": "app:9"},
+ "createdAt": "2026-11-17T12:20:03+00:00", "answerBy": "2026-11-17T13:20:03+00:00",
+ "answerUrl": "https://cloud.example.com/siren/v1/apps/requests/apr_9c60190a4501399d0ae55f041c237b39/answer",
+ "data": {}}
 ```
 
-The answer is `outcome` `filtered` and, in `include`, the ids of the lines
-that count, each at most once. An empty list includes nothing. When a record
-picks more than one filter, a line counts when any of them includes it. Siren
-refuses an id the question lacks with 422 `app_answer_invalid`. A refund
-reuses the stored answer, so Siren never sends refund lines.
+`answer()` sends `POST /apps/requests/{id}/answer` once and never retries it,
+and returns an `AppAnswerReceipt`. It throws `InvalidArgumentException`
+before sending for an id that is not a request key, an answer that is a list,
+one with no text `outcome`, and one over 16384 bytes as JSON. A different
+second answer throws `ConflictException` with code
+`app_request_already_answered`, and the first answer stands. When Siren takes
+no answer from the key, `AuthenticationException` carries
+`ErrorCode::APP_ANSWER_UNAUTHORIZED`.
 
-A collaborator group structure (`AppItemKind::COLLABORATOR_GROUP_STRUCTURE`)
-gives a collaborator group's shape. Siren asks it once per cascade trigger on
-a group that picks it, for a program (an engagement cascade) or a distributor
-(a metric cascade). Its question names the `group`, its `members` with each
-one's `collaboratorId`, `name`, `status` at the trigger, which Siren credits
-the member by, and `metadata`, what the cascade is `for`, the
-`triggeringCollaborator` and the `cause`, whose `id` is the trigger's own
-random id of 16 hex characters. It also carries the fields of the trigger it
-interrupts. A program's ask carries an engagement calculation's fields (`program`,
-`engagementType`, `programEngagementTypeId`, `args` and `opportunity`) and an engagement's
-`cause`, which the PHPStan type `AppCollaboratorGroupStructureProgramQuestion` describes. A
-distributor's ask carries a metric calculation's fields:
+## Errors and retries
 
-```json
-{"group": {"id": 4, "name": "Northeast team"},
- "members": [{"collaboratorId": 42, "name": "Riley Rep", "status": "active", "metadata": {"rank": 3}},
-             {"collaboratorId": 57, "name": "Sam Lead", "status": "active", "metadata": {"rank": 2}},
-             {"collaboratorId": 63, "name": "Jo Manager", "status": "active", "metadata": {"rank": 1}}],
- "for": {"type": "distributor", "id": 2},
- "triggeringCollaborator": {"id": 42, "name": "Riley Rep"},
- "cause": {"id": "9f2c4e1a7b3d5c60", "type": null, "causeId": null},
- "distributor": {"id": 2, "name": "Partner leaderboard"},
- "distribution": {"id": 21, "periodEnd": "2026-12-01T00:00:00+00:00"},
- "metricType": "referredSiteVisit", "distributorMetricTypeId": 55,
- "opportunityId": 615, "points": null, "sale": null}
+What Siren does when an app doesn't answer:
+
+- **A tell.** Siren waits 8 seconds for a reply. A timeout or any status
+  outside 2xx is tried again about 1, 2, 4 and 8 minutes later, five tries in
+  all. Then the request shows under Needs attention, where an admin can send
+  it again.
+- **An ask.** A failed delivery is tried the same way, and the answer can
+  still come any time before `answerBy`. With no answer by then, Siren sends
+  the request again with a new window, three sends in all, and then the
+  request needs attention.
+- **The 24-hour limit.** Every ask but a distribution resolver's waits at
+  most 24 hours. Then Siren drops it: the work goes on as if the app answered
+  with nothing, so the sale earns no reward from it, the metric scores
+  nothing, and distributors pay on their own schedule. A payout is marked
+  failed. A distribution resolver's distribution waits until an admin sends
+  the request again or answers it by hand. An answer after that throws `ConflictException` with code
+  `app_request_dropped` and changes nothing. While an app's requests wait too
+  long, its problem contacts, or the organization's admins when it names
+  none, get an email about twice a week.
+
+What the handler does with an ask's answer: it checks the answer as
+`requests->answer()` does and posts it with the client's key. Unlike
+`requests->answer()`, it sends the answer again after a lost connection, a
+429 or a 5xx, inside the client's `maxRetries`, since it sends the very same
+answer and Siren takes that again as a duplicate. A refusal is not sent
+again, and goes to `onError`:
+
+| Siren answers | Exception | `getErrorCode()` | What it means |
+|---------------|-----------|------------------|---------------|
+| 422 | `ValidationException` | `app_answer_invalid` | The answer doesn't fit the kind. Siren keeps nothing, so send a corrected one. |
+| 409 | `ConflictException` | `app_request_already_answered` | Siren already took a different answer, which stands. |
+| 409 | `ConflictException` | `app_request_dropped` | Siren stopped waiting after 24 hours, and the answer was not used. |
+| 401 | `AuthenticationException` | `app_answer_unauthorized` | The client's key is not the app's own. |
+| 403, 404 | `PermissionException`, `NotFoundException` | Siren's code | The key can't answer this request, or there is no such request. |
+
+When the function throws or no answer lands, Siren asks again after
+`answerBy`. To act on a refusal, read it in `onError`:
+
+<!-- readme-test: on-error -->
+```php
+$answers = $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'), [
+    'onError' => function (\Throwable $error, ?object $about) {
+        if ($error instanceof \Siren\Sdk\Exception\ConflictException && $error->getErrorCode() === 'app_request_dropped') {
+            // Siren stopped waiting, so undo whatever the app did for this request.
+            undoWork($about->id);
+            return;
+        }
+        error_log($error->getMessage());
+    },
+]);
 ```
 
-The answer is a chain or a tree. A chain's `order` lists every member's
-`collaboratorId` once, top of the chain first, and Siren reads it as its
-built-in linear chain. A tree's `parents` holds every member's
-`collaboratorId` as text once, each mapped to another member's id or to null
-for a top member, with no cycle, and Siren reads it as its parent and child
-structure. Siren refuses an answer that breaks these rules with 422
-`app_answer_invalid`.
+[Errors](#errors) lists every exception the SDK throws.
+
+## Quickstart
+
+### Record a sale
+
+Mint an API key in the Siren dashboard (Settings → API Keys) with the
+`event:*` scope, then:
 
 ```php
-use Siren\Sdk\AppItemKind;
+use Siren\Sdk\Siren;
 
-if ($request->isAsk() && $request->item['kind'] === AppItemKind::METRIC_CALCULATION) {
-    $siren->apps->requests->answer($request->id, [
-        'outcome' => 'scores',
-        'results' => [['collaboratorId' => 7, 'score' => 10]],
-    ]);
-}
+$siren = new Siren(['apiKey' => 'sk_live_...']);
 
-if ($request->isAsk() && $request->item['kind'] === AppItemKind::METRIC_FILTER) {
-    $collaboratorId = $request->data['collaborator']['id'];
-    $siren->apps->requests->answer($request->id, ownsCustomer($collaboratorId)
-        ? ['outcome' => 'suppress', 'reason' => 'Customer already owned by a partner']
-        : ['outcome' => 'allow']);
-}
+$result = $siren->events->sale([
+    'source'     => 'stripe',            // your commerce source
+    'externalId' => 'cs_test_a1b2c3',    // your order id — used to match refunds later
+    'total'      => 49.99,               // major units: 49.99 = $49.99
+    'trackingId' => 4021,                // opportunity id from the Siren tracking cookie
+    'currency'   => 'USD',               // optional, defaults to the organization's currency
+    'items'      => [                    // optional; omit to treat total as one line
+        ['name' => 'Pro Plan (annual)', 'amount' => 49.99, 'quantity' => 1],
+    ],
+]);
 
-if ($request->isAsk() && $request->item['kind'] === AppItemKind::INCENTIVE_RESOLVER) {
-    $pool = $request->data['pool'];
-    $conversions = $request->data['conversions'];
-    $total = array_sum(array_column($conversions, 'score'));
-    $rewards = [];
-    foreach ($conversions as $conversion) {
-        $rewards[(string) $conversion['conversionId']] = $total > 0 ? intdiv($pool['value'] * $conversion['score'], $total) : null;
-    }
-    $siren->apps->requests->answer($request->id, ['outcome' => 'rewards', 'units' => $pool['units'], 'rewards' => $rewards]);
-}
-
-if ($request->isAsk() && $request->item['kind'] === AppItemKind::ENGAGEMENT_CALCULATION) {
-    $siren->apps->requests->answer($request->id, [
-        'outcome' => 'engagements',
-        'results' => [['collaboratorId' => $request->data['triggeringCollaborator']['id'], 'score' => 10]],
-    ]);
-}
-
-if ($request->isAsk() && $request->item['kind'] === AppItemKind::ENGAGEMENT_FILTER) {
-    $siren->apps->requests->answer($request->id, isStaff($request->data['collaborator']['id'])
-        ? ['outcome' => 'suppress', 'reason' => 'The visitor works for the partner.']
-        : ['outcome' => 'allow']);
-}
-
-if ($request->isAsk() && $request->item['kind'] === AppItemKind::TRANSACTION_FILTER) {
-    $lines = array_filter($request->data['lines'], fn ($line) => $line['type'] === 'lineItem');
-    $siren->apps->requests->answer($request->id, ['outcome' => 'filtered', 'include' => array_column($lines, 'id')]);
-}
-
-if ($request->isAsk() && $request->item['kind'] === AppItemKind::COLLABORATOR_GROUP_STRUCTURE) {
-    $chain = ['outcome' => 'structure', 'shape' => 'chain', 'order' => [63, 57, 42]];
-    $tree = ['outcome' => 'structure', 'shape' => 'tree', 'parents' => ['42' => 57, '57' => 63, '63' => null]];
-    $siren->apps->requests->answer($request->id, $useTree ? $tree : $chain);
-}
+echo $result->getOpportunityId(); // read from the X-Siren-OID response header
+echo $result->getStatus();        // EventStatus::CREATED, RECORDED, DUPLICATE, UNATTRIBUTED or IGNORED
 ```
+
+Siren answers 202 instead of 200 when the organization's engine is paused,
+such as when it is over its usage threshold. The event is queued and runs
+once the engine resumes, so `$result->isQueued()` is true and the event must
+not be sent again.
+
+Refunds reverse a sale by `(externalId, source)`:
+
+```php
+$siren->events->refund([
+    'source'     => 'stripe',
+    'externalId' => 'cs_test_a1b2c3',
+]);
+```
+
+### Verify a webhook
+
+Siren signs every delivery with `X-Siren-Signature: sha256=<hex hmac>` — an
+HMAC-SHA256 of the **raw request body** keyed by your subscription's signing
+secret. The body is the event's payload. Siren names the event in the
+`X-Siren-Event` header and the delivery in `X-Siren-Delivery`, which stays
+the same when a delivery is retried.
+
+> ⚠️ **Pass the raw body bytes.** The HMAC is computed over the exact bytes
+> Siren sent. Read `php://input` directly — if you `json_decode` and re-encode
+> the payload, verification **will fail**.
+
+```php
+use Siren\Sdk\Siren;
+use Siren\Sdk\WebhookEventType;
+use Siren\Sdk\Exception\SignatureVerificationException;
+
+$siren = new Siren(['apiKey' => 'sk_live_...']);
+
+try {
+    $event = $siren->webhooks->constructEventFromHeaders(
+        file_get_contents('php://input'),
+        getallheaders(),
+        $signingSecret,
+    );
+} catch (SignatureVerificationException $e) {
+    http_response_code(400);
+    exit;
+}
+
+match ($event->getType()) {
+    WebhookEventType::CONVERSION_APPROVED => handleConversion($event->getData()),
+    WebhookEventType::PAYOUT_PAID         => handlePayout($event->getData()),
+    default                               => null,
+};
+```
+
+`constructEvent($rawBody, $signature, $secret, $eventType, $deliveryId)`
+does the same with the three header values passed one by one. A
+delivery whose body is the bare payload is refused without `$eventType`,
+because only the `X-Siren-Event` header names its event.
+
+Create a subscription (the `signingSecret` is returned **once** — store it).
+An API key that holds `webhook-subscriptions:manage` can do this, and so can
+a signed-in dashboard session's access token:
+
+```php
+$siren = new Siren(['apiKey' => 'sk_live_...']); // a key with ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE
+
+$subscription = $siren->webhooks->subscriptions->create([
+    'targetUrl' => 'https://example.com/webhooks/siren',
+    'events'    => [WebhookEventType::CONVERSION_APPROVED, WebhookEventType::PAYOUT_PAID],
+    // or [WebhookEventType::ALL] to subscribe to everything
+]);
+
+$secret = $subscription['signingSecret'];
+
+$siren->webhooks->subscriptions->events(); // the live catalog: [{event, category, label}, ...]
+```
+
+### Check and change a subscription
+
+`retrieve($id)` reads one subscription, never with its signing secret, and
+`deliveries($id)` reads its latest 50 deliveries, newest first. Each delivery
+carries the payload Siren sent, its status (`pending`, `delivered` or
+`failed`), the tries it took and the first 200 bytes of your endpoint's
+answer. Both take `webhook-subscriptions:read` or
+`webhook-subscriptions:manage`, and both retry as reads.
+
+`update($id, $params)` changes the target URL, the events, the status or the
+description, and sends only the fields you give. Any other key throws
+`InvalidArgumentException` before sending. So does an update with no field
+that is not `null`, because Siren skips a `null` field and cannot apply an
+update with nothing to change. `test($id)` makes Siren send one
+signed `webhook.test` delivery now and answers what your endpoint did. Siren
+answers 200 either way, so read `delivered`. Both take
+`webhook-subscriptions:manage`, and each is sent once.
+
+```php
+$result = $siren->webhooks->subscriptions->test($subscription['id']);
+
+if (!$result['delivered']) {
+    $latest = $siren->webhooks->subscriptions->deliveries($subscription['id'])[0] ?? null;
+    error_log(sprintf('%s %s', $latest['httpStatusCode'] ?? '-', $latest['responseBody'] ?? ''));
+}
+
+// Stop deliveries while you fix the endpoint, then start them again.
+$siren->webhooks->subscriptions->update($subscription['id'], ['status' => WebhookSubscriptionStatus::PAUSED]);
+$siren->webhooks->subscriptions->update($subscription['id'], ['status' => WebhookSubscriptionStatus::ACTIVE]);
+```
+
+Siren refuses a test for a paused subscription with a 409, raised as
+`ConflictException`. From one address it allows 20 tests an hour for one
+subscription and 60 in all, and answers more with a 429, raised as
+`RateLimitException`.
 
 ### Which credential does each call need?
 
