@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk\Tests;
 
 use ReflectionClass;
-use Siren\Sdk\AppItemKind;
+use Siren\Sdk\FeatureKind;
 use Siren\Sdk\AppRequest;
 
 /**
@@ -65,14 +65,14 @@ final class AppTransactionFilterTest extends TestCase
     }
 
     /**
-     * Siren's request envelope with this kind's item and a question, as JSON.
+     * Siren's request envelope with this kind's feature and a question, as JSON.
      *
      * @param array<string, mixed> $data
      */
     private static function body(string $key, array $data): string
     {
         $request = self::contracts()['kinds']['distributionResolver']['request'];
-        $request['item'] = ['kind' => 'transactionFilter', 'key' => $key, 'id' => 'app:11'];
+        $request['feature'] = ['kind' => 'transactionFilter', 'key' => $key, 'id' => 'app:11'];
         $request['data'] = $data;
 
         return json_encode($request, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
@@ -102,10 +102,10 @@ final class AppTransactionFilterTest extends TestCase
 
     public function testTheKindIsNamedInBothListsAsAnAsk(): void
     {
-        $this->assertSame('transactionFilter', AppItemKind::TRANSACTION_FILTER);
-        $this->assertSame('transactionFilter', AppItemKind::TRANSACTION_FILTER);
-        $this->assertContains('transactionFilter', (new ReflectionClass(AppItemKind::class))->getConstants());
-        $this->assertContains('transactionFilter', AppItemKind::ASKS);
+        $this->assertSame('transactionFilter', FeatureKind::TRANSACTION_FILTER);
+        $this->assertSame('transactionFilter', FeatureKind::TRANSACTION_FILTER);
+        $this->assertContains('transactionFilter', (new ReflectionClass(FeatureKind::class))->getConstants());
+        $this->assertContains('transactionFilter', FeatureKind::ASKS);
     }
 
     public function testTheReadmeSampleIncludesOnlyTheLineItems(): void

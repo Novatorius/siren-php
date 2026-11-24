@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Siren\Sdk\Tests;
 
-use Siren\Sdk\AppItemKind;
+use Siren\Sdk\FeatureKind;
 
 /**
  * Slice C16-6: the incentive type kind, and the answer the request handler's
@@ -22,10 +22,10 @@ final class AppIncentiveTypeTest extends TestCase
 
     public function testTheKindIsTheValueSirenStoresAndAnAsk(): void
     {
-        $this->assertSame('incentiveType', AppItemKind::INCENTIVE_TYPE);
-        $this->assertSame('incentiveType', AppItemKind::INCENTIVE_TYPE);
-        $this->assertContains(AppItemKind::INCENTIVE_TYPE, AppItemKind::ASKS);
-        $this->assertNotContains(AppItemKind::INCENTIVE_TYPE, AppItemKind::TELLS);
+        $this->assertSame('incentiveType', FeatureKind::INCENTIVE_TYPE);
+        $this->assertSame('incentiveType', FeatureKind::INCENTIVE_TYPE);
+        $this->assertContains(FeatureKind::INCENTIVE_TYPE, FeatureKind::ASKS);
+        $this->assertNotContains(FeatureKind::INCENTIVE_TYPE, FeatureKind::TELLS);
     }
 
     public function testTheSampleAnswerIsTheFixturesAndPassesSirensCheck(): void

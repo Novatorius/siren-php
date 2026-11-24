@@ -20,7 +20,7 @@ final class AppRequest
      * @param string $id The request's id, `apr_` and 32 hex characters. It is the same on every send of this request, so write once by `id`.
      * @param string $mode `tell` or `ask`.
      * @param string $app The app's key.
-     * @param array{kind: string, key: string, id: string} $item The feature asked: its kind, its key and its `app:{n}` id. `item.id` names the feature, not the request, so many requests share it.
+     * @param array{kind: string, key: string, id: string} $feature The feature asked: its kind, its key and its `app:{n}` id. `feature.id` names the feature, not the request, so many requests share it.
      * @param string $createdAt When Siren recorded the request, ISO 8601.
      * @param string|null $answerBy When an ask stops waiting for this send, ISO 8601. Null for a tell.
      * @param string|null $answerUrl Where an ask's answer goes. Null for a tell.
@@ -35,7 +35,7 @@ final class AppRequest
         public readonly string $type,
         public readonly string $mode,
         public readonly string $app,
-        public readonly array $item,
+        public readonly array $feature,
         public readonly string $createdAt,
         public readonly ?string $answerBy,
         public readonly ?string $answerUrl,

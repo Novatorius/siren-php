@@ -249,7 +249,7 @@ final class AppRequestHandlerTest extends TestCase
             'not JSON' => ['{"version": 1', 'app.request'],
             'version 2' => [$envelope(['version' => 2]), 'app.request'],
             'an id that is not a request key' => [$envelope(['id' => 'apr_1']), 'app.request'],
-            'an item with no kind' => [$envelope(['item' => ['key' => 'tell-the-crm', 'id' => 'app:7']]), 'app.request'],
+            'a feature with no kind' => [$envelope(['feature' => ['key' => 'tell-the-crm', 'id' => 'app:7']]), 'app.request'],
             'an ask with no answer address' => [$envelope(['mode' => 'ask']), 'app.request'],
             'a list' => ['[1, 2]', 'app.request'],
             'an event that is not JSON' => ['not json', 'conversion.approved'],
@@ -336,13 +336,13 @@ final class AppRequestHandlerTest extends TestCase
         $calls = [];
         $handler = $this->handler()
             ->on('postAllocationAction', function (AppRequest $request) use (&$calls): void {
-                $calls[] = 'every ' . $request->item['key'];
+                $calls[] = 'every ' . $request->feature['key'];
             })
             ->on('postAllocationAction', 'note-the-share', function () use (&$calls): void {
                 $calls[] = 'note-the-share';
             });
         $request = self::contracts()['kinds']['postAllocationAction']['request'];
-        $other = json_encode(['item' => ['kind' => 'postAllocationAction', 'key' => 'another-key', 'id' => 'app:11']] + $request, JSON_THROW_ON_ERROR);
+        $other = json_encode(['feature' => ['kind' => 'postAllocationAction', 'key' => 'another-key', 'id' => 'app:11']] + $request, JSON_THROW_ON_ERROR);
         $body = self::body('postAllocationAction');
 
         $this->assertReply(200, $handler->answer('POST', $body, self::signed($body)));

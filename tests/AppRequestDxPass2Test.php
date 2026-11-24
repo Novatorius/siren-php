@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk\Tests;
 
 use PHPUnit\Framework\Attributes\DataProvider;
-use Siren\Sdk\AppItemKind;
+use Siren\Sdk\FeatureKind;
 use Siren\Sdk\AppRequest;
 use Siren\Sdk\AppRequestHandler;
 use Siren\Sdk\Exception\ValidationException;
@@ -67,10 +67,10 @@ final class AppRequestDxPass2Test extends TestCase
         return $reply;
     }
 
-    /** @return array<string, mixed> */
-    private static function kindsFixture(): array
+    /** @return list<array{kind: string, term: string, name: string, description: string, mode: string, direction: string}> */
+    private static function kindsSnapshot(): array
     {
-        return json_decode((string) file_get_contents(__DIR__ . '/Fixtures/apps-kinds/app-kinds.json'), true, 512, JSON_THROW_ON_ERROR);
+        return json_decode((string) file_get_contents(dirname(__DIR__) . '/resources/app-kinds.json'), true, 512, JSON_THROW_ON_ERROR);
     }
 
     /** What the default `onError` writes for the request, read from a temporary error log. */
@@ -99,15 +99,15 @@ final class AppRequestDxPass2Test extends TestCase
         return [
             'a near miss' => ['distributionResolvr', 'distributionResolvr is not a feature kind. Did you mean distributionResolver?'],
             'another case' => ['DistributionResolver', 'DistributionResolver is not a feature kind. Did you mean distributionResolver?'],
-            'a screen name in camelCase' => ['attributionModel', "Attribution model's kind is incentiveResolver."],
-            'a screen name as the screen writes it' => ['Attribution model', "Attribution model's kind is incentiveResolver."],
-            'a screen name ending in s' => ['customerFilterForPrograms', "Customer filter for programs' kind is engagementFilter."],
+            'a screen name in camelCase' => ['attributionModel', "The kind for Attribution model is incentiveResolver."],
+            'a screen name as the screen writes it' => ['Attribution model', "The kind for Attribution model is incentiveResolver."],
+            'a screen name ending in s' => ['customerFilterForPrograms', "The kind for Customer filter for programs is engagementFilter."],
             'snake_case' => ['distribution_resolver', 'Kinds are camelCase, as Siren sends them: distributionResolver.'],
             'a constant name' => ['PAYOUT_METHOD', 'Kinds are camelCase, as Siren sends them: payoutMethod.'],
             'a custom event' => ['customEvent', 'Siren never sends a custom event. Your app sends one with events->ingest().'],
             'a webhook event' => ['conversion.approved', 'conversion.approved is a webhook event. Register it with onEvent().'],
             'the old payout name' => ['fulfillmentMethod', 'fulfillmentMethod is the old name. Use payoutMethod.'],
-            'anything else' => ['banana', 'banana is not a feature kind. The kinds are: ' . implode(', ', AppItemKind::SENT) . '.'],
+            'anything else' => ['banana', 'banana is not a feature kind. The kinds are: ' . implode(', ', FeatureKind::SENT) . '.'],
         ];
     }
 
@@ -137,12 +137,12 @@ final class AppRequestDxPass2Test extends TestCase
     {
         $handler = $this->handler();
 
-        foreach (AppItemKind::SENT as $kind) {
+        foreach (FeatureKind::SENT as $kind) {
             $handler->on($kind, 'the-key', static fn () => $handler->later());
             $handler->on($kind, static fn () => $handler->later());
         }
 
-        $this->assertCount(13, AppItemKind::SENT);
+        $this->assertCount(13, FeatureKind::SENT);
     }
 
     public function testExtraKindsLetsOnTakeAKindANewerSirenAdds(): void
@@ -159,7 +159,7 @@ final class AppRequestDxPass2Test extends TestCase
             'type' => 'app.request',
             'mode' => 'tell',
             'app' => 'acme-crm',
-            'item' => ['kind' => 'payoutReview', 'key' => 'check-it', 'id' => 'app:9'],
+            'feature' => ['kind' => 'payoutReview', 'key' => 'check-it', 'id' => 'app:9'],
             'createdAt' => '2026-11-17T12:20:03+00:00',
             'data' => [],
         ]]);
@@ -188,22 +188,18 @@ final class AppRequestDxPass2Test extends TestCase
         $this->mockSiren([])->apps->requestHandler(self::SECRET, ['extraKinds' => $extraKinds]);
     }
 
-    public function testTheKindsAreSirensAppKinds(): void
+    public function testTheKindsOnTakesComeFromSirensKindsSnapshot(): void
     {
-        $fixture = self::kindsFixture();
-        $kinds = array_column($fixture['appKinds'], 'kind');
+        $snapshot = self::kindsSnapshot();
+        $modes = array_column($snapshot, 'mode', 'kind');
+        $sent = array_keys(array_filter($modes, static fn (string $mode): bool => $mode === 'tell' || $mode === 'ask'));
 
-        $this->assertSame($kinds, AppItemKind::SENT, 'The kinds on() takes are Siren\'s APP_KINDS, in its order.');
-        $this->assertNotContains(AppItemKind::CUSTOM_EVENT, AppItemKind::SENT);
-        $this->assertSame($fixture['customEvent']['kind'], AppItemKind::CUSTOM_EVENT);
-        $this->assertSame(
-            array_column($fixture['appKinds'], 'name', 'kind') + [$fixture['customEvent']['kind'] => $fixture['customEvent']['name']],
-            AppItemKind::NAMES,
-        );
-
-        $modes = array_column($fixture['appKinds'], 'mode', 'kind');
-        $this->assertSame(array_keys(array_filter($modes, static fn (string $mode): bool => $mode === 'tell')), AppItemKind::TELLS);
-        $this->assertSame(array_keys(array_filter($modes, static fn (string $mode): bool => $mode === 'ask')), AppItemKind::ASKS);
+        $this->assertSame($sent, FeatureKind::SENT, 'The kinds on() takes are the snapshot\'s tells and asks, in its order.');
+        $this->assertNotContains(FeatureKind::CUSTOM_EVENT, FeatureKind::SENT);
+        $this->assertSame('receive', $modes[FeatureKind::CUSTOM_EVENT]);
+        $this->assertSame(array_column($snapshot, 'name', 'kind'), FeatureKind::NAMES);
+        $this->assertSame(array_keys(array_filter($modes, static fn (string $mode): bool => $mode === 'tell')), FeatureKind::TELLS);
+        $this->assertSame(array_keys(array_filter($modes, static fn (string $mode): bool => $mode === 'ask')), FeatureKind::ASKS);
     }
 
     // Finding 3: "answer later" is something the function says.
@@ -355,9 +351,10 @@ final class AppRequestDxPass2Test extends TestCase
 
     public function testOneClassNamesTheKinds(): void
     {
-        $this->assertFalse(class_exists('Siren\\Sdk\\AppFeatureKind'), 'AppItemKind holds what AppFeatureKind held.');
-        $this->assertSame(['postConversionAction', 'postAllocationAction'], AppItemKind::TELLS);
-        $this->assertStringContainsString('@phpstan-type AppDistributionAnswer', (string) (new \ReflectionClass(AppItemKind::class))->getDocComment());
+        $this->assertFalse(class_exists('Siren\\Sdk\\AppFeatureKind'), 'FeatureKind holds what AppFeatureKind held.');
+        $this->assertFalse(class_exists('Siren\\Sdk\\AppItemKind'), 'FeatureKind replaces AppItemKind, with no old name kept.');
+        $this->assertSame(['postConversionAction', 'postAllocationAction'], FeatureKind::TELLS);
+        $this->assertStringContainsString('@phpstan-type AppDistributionAnswer', (string) (new \ReflectionClass(FeatureKind::class))->getDocComment());
     }
 
     public function testTheRequestNamesTheIdToDedupeOn(): void
@@ -365,7 +362,7 @@ final class AppRequestDxPass2Test extends TestCase
         $doc = (string) (new \ReflectionClass(AppRequest::class))->getConstructor()?->getDocComment();
 
         $this->assertStringContainsString('the same on every send of this request, so write once by `id`', $doc);
-        $this->assertStringContainsString('`item.id` names the feature', $doc);
+        $this->assertStringContainsString('`feature.id` names the feature', $doc);
         $this->assertStringContainsString('changes on every send', $doc);
     }
 

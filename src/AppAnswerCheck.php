@@ -58,16 +58,16 @@ final class AppAnswerCheck
         }
 
         return match ($kind) {
-            AppItemKind::DISTRIBUTION_RESOLVER => self::distribution($question, $answer),
-            AppItemKind::INCENTIVE_RESOLVER => self::reward($question, $answer),
-            AppItemKind::INCENTIVE_TYPE => self::incentiveType($question, $answer),
-            AppItemKind::PAYOUT_METHOD => self::payout($answer),
-            AppItemKind::METRIC_CALCULATION => self::results('scores', $answer),
-            AppItemKind::ENGAGEMENT_CALCULATION => self::results('engagements', $answer),
-            AppItemKind::METRIC_FILTER, AppItemKind::ENGAGEMENT_FILTER => self::filter($answer),
-            AppItemKind::PROGRAM_GROUP_SORTER => self::groupOrder($question, $answer),
-            AppItemKind::TRANSACTION_FILTER => self::transactionFilter($question, $answer),
-            AppItemKind::COLLABORATOR_GROUP_STRUCTURE => self::groupStructure($question, $answer),
+            FeatureKind::DISTRIBUTION_RESOLVER => self::distribution($question, $answer),
+            FeatureKind::INCENTIVE_RESOLVER => self::reward($question, $answer),
+            FeatureKind::INCENTIVE_TYPE => self::incentiveType($question, $answer),
+            FeatureKind::PAYOUT_METHOD => self::payout($answer),
+            FeatureKind::METRIC_CALCULATION => self::results('scores', $answer),
+            FeatureKind::ENGAGEMENT_CALCULATION => self::results('engagements', $answer),
+            FeatureKind::METRIC_FILTER, FeatureKind::ENGAGEMENT_FILTER => self::filter($answer),
+            FeatureKind::PROGRAM_GROUP_SORTER => self::groupOrder($question, $answer),
+            FeatureKind::TRANSACTION_FILTER => self::transactionFilter($question, $answer),
+            FeatureKind::COLLABORATOR_GROUP_STRUCTURE => self::groupStructure($question, $answer),
             default => null,
         };
     }

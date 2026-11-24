@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk\Tests;
 
 use ReflectionClass;
-use Siren\Sdk\AppItemKind;
+use Siren\Sdk\FeatureKind;
 use Siren\Sdk\Exception\ConflictException;
 
 /**
@@ -20,7 +20,7 @@ final class AppIncentiveResolverTest extends TestCase
 
     public function testTheKindsMatchTheValuesSirenStores(): void
     {
-        $values = array_values(array_filter((new ReflectionClass(AppItemKind::class))->getConstants(), 'is_string'));
+        $values = array_values(array_filter((new ReflectionClass(FeatureKind::class))->getConstants(), 'is_string'));
         sort($values);
 
         $this->assertSame([
@@ -39,7 +39,7 @@ final class AppIncentiveResolverTest extends TestCase
             'programGroupSorter',
             'transactionFilter',
         ], $values);
-        $this->assertSame('incentiveResolver', AppItemKind::INCENTIVE_RESOLVER);
+        $this->assertSame('incentiveResolver', FeatureKind::INCENTIVE_RESOLVER);
     }
 
     /**

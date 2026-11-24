@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk\Tests;
 
 use ReflectionClass;
-use Siren\Sdk\AppItemKind;
+use Siren\Sdk\FeatureKind;
 
 /**
  * Slice C16-1: the metric calculation and metric filter kinds, and an
@@ -17,7 +17,7 @@ final class AppMetricKindsTest extends TestCase
 
     public function testTheKindsMatchTheValuesSirenStores(): void
     {
-        $values = array_values(array_filter((new ReflectionClass(AppItemKind::class))->getConstants(), 'is_string'));
+        $values = array_values(array_filter((new ReflectionClass(FeatureKind::class))->getConstants(), 'is_string'));
         sort($values);
 
         $this->assertSame([
@@ -36,8 +36,8 @@ final class AppMetricKindsTest extends TestCase
             'programGroupSorter',
             'transactionFilter',
         ], $values);
-        $this->assertSame('metricCalculation', AppItemKind::METRIC_CALCULATION);
-        $this->assertSame('metricFilter', AppItemKind::METRIC_FILTER);
+        $this->assertSame('metricCalculation', FeatureKind::METRIC_CALCULATION);
+        $this->assertSame('metricFilter', FeatureKind::METRIC_FILTER);
     }
 
     /**

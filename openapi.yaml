@@ -3268,7 +3268,7 @@ components:
       type: object
       description: |
         An answer to an ask, at most 16384 bytes of JSON. Its shape depends on
-        the feature's kind, as `AppFeatureKind` types it, and every answer
+        the feature's kind, as `FeatureKind` types it, and every answer
         carries a text `outcome`.
       required: [outcome]
       properties:

@@ -110,7 +110,7 @@ final class AppRequestHandler
     /** @var (callable(\Throwable, AppRequest|WebhookEvent|null): void)|null The caller's, or null for the default line. */
     private $onError;
 
-    /** @var array<string, true> The kinds {@see on()} takes: {@see AppItemKind::SENT} and `extraKinds`. */
+    /** @var array<string, true> The kinds {@see on()} takes: {@see FeatureKind::SENT} and `extraKinds`. */
     private array $kinds;
 
     /** @var array<string, array<string, callable(AppRequest): mixed>> */
@@ -184,7 +184,7 @@ final class AppRequestHandler
         $this->tolerance = $tolerance;
         $this->runLater = $runLater;
         $this->onError = $onError;
-        $this->kinds = array_fill_keys(array_merge(AppItemKind::SENT, $extraKinds), true);
+        $this->kinds = array_fill_keys(array_merge(FeatureKind::SENT, $extraKinds), true);
     }
 
     /**
@@ -213,10 +213,10 @@ final class AppRequestHandler
      * is not read. For an ask it returns the answer as an array, such as
      * `['outcome' => 'allocated', 'units' => 'USD', 'shares' => [...]]`, or
      * {@see later()} to answer later. Returning nothing from an ask is an
-     * error. {@see AppItemKind} names the kinds and the shape of each
+     * error. {@see FeatureKind} names the kinds and the shape of each
      * question and answer.
      *
-     * The kind must be one Siren sends, {@see AppItemKind::SENT}, or one of
+     * The kind must be one Siren sends, {@see FeatureKind::SENT}, or one of
      * the handler's `extraKinds`. Any other kind is refused at once, with
      * what to write instead, since Siren would never reach its function.
      *
@@ -516,8 +516,8 @@ final class AppRequestHandler
 
     private function route(AppRequest $request, bool $workHeld, ?\stdClass $trace = null): AppRequestReply
     {
-        $kind = (string) $request->item['kind'];
-        $key = (string) $request->item['key'];
+        $kind = (string) $request->feature['kind'];
+        $key = (string) $request->feature['key'];
         $fn = $this->byKey[$kind][$key] ?? $this->byKind[$kind] ?? null;
 
         if ($fn === null) {
@@ -601,8 +601,8 @@ final class AppRequestHandler
         if ($answer === null) {
             $this->report(new \UnexpectedValueException(sprintf(
                 'The function for %s %s returned nothing. Return the answer, or return $answers->later() when you will answer with apps->requests->answer().',
-                $request->item['kind'],
-                $request->item['key'],
+                $request->feature['kind'],
+                $request->feature['key'],
             )), $request, $trace, $next);
 
             return;
@@ -611,8 +611,8 @@ final class AppRequestHandler
         if (!is_array($answer)) {
             $this->report(new \InvalidArgumentException(sprintf(
                 "The function for %s %s returns the answer as an array, such as ['outcome' => '...'], or \$answers->later() to answer later, and it returned %s.",
-                $request->item['kind'],
-                $request->item['key'],
+                $request->feature['kind'],
+                $request->feature['key'],
                 get_debug_type($answer),
             )), $request, $trace, $next);
 
@@ -622,7 +622,7 @@ final class AppRequestHandler
         try {
             if ($trace !== null) {
                 $this->requests->check($request->id, $answer);
-                $problem = AppAnswerCheck::problem((string) $request->item['kind'], $request->data, $answer);
+                $problem = AppAnswerCheck::problem((string) $request->feature['kind'], $request->data, $answer);
 
                 if ($problem !== null) {
                     throw new ValidationException($problem, 422, ErrorCode::APP_ANSWER_INVALID);
@@ -673,14 +673,14 @@ final class AppRequestHandler
         }
 
         if ($given === 'fulfillmentmethod') {
-            return sprintf('%s is the old name. Use %s.', $kind, AppItemKind::PAYOUT_METHOD);
+            return sprintf('%s is the old name. Use %s.', $kind, FeatureKind::PAYOUT_METHOD);
         }
 
-        if ($given === $folded(AppItemKind::CUSTOM_EVENT)) {
+        if ($given === $folded(FeatureKind::CUSTOM_EVENT)) {
             return 'Siren never sends a custom event. Your app sends one with events->ingest().';
         }
 
-        foreach (AppItemKind::SENT as $known) {
+        foreach (FeatureKind::SENT as $known) {
             if ($given === $folded($known)) {
                 return str_contains($kind, '_')
                     ? sprintf('Kinds are camelCase, as Siren sends them: %s.', $known)
@@ -688,21 +688,21 @@ final class AppRequestHandler
             }
         }
 
-        foreach (AppItemKind::SENT as $known) {
-            $name = AppItemKind::NAMES[$known];
+        foreach (FeatureKind::SENT as $known) {
+            $name = FeatureKind::NAMES[$known];
 
             if ($given === $folded($name)) {
-                return sprintf("%s%s kind is %s.", $name, str_ends_with($name, 's') ? "'" : "'s", $known);
+                return sprintf('The kind for %s is %s.', $name, $known);
             }
         }
 
-        foreach (AppItemKind::SENT as $known) {
+        foreach (FeatureKind::SENT as $known) {
             if (levenshtein($kind, $known) <= 2) {
                 return sprintf('%s is not a feature kind. Did you mean %s?', $kind, $known);
             }
         }
 
-        return sprintf('%s is not a feature kind. The kinds are: %s.', $kind, implode(', ', AppItemKind::SENT));
+        return sprintf('%s is not a feature kind. The kinds are: %s.', $kind, implode(', ', FeatureKind::SENT));
     }
 
     /**
@@ -785,7 +785,7 @@ final class AppRequestHandler
     private static function logError(\Throwable $error, AppRequest|WebhookEvent|null $about, ?string $next = null): void
     {
         $what = match (true) {
-            $about instanceof AppRequest => sprintf(' for %s %s, request %s', $about->item['kind'], $about->item['key'], $about->id),
+            $about instanceof AppRequest => sprintf(' for %s %s, request %s', $about->feature['kind'], $about->feature['key'], $about->id),
             $about instanceof WebhookEvent => ' for ' . $about->getType(),
             default => '',
         };

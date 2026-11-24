@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk\Tests;
 
 use ReflectionClass;
-use Siren\Sdk\AppItemKind;
+use Siren\Sdk\FeatureKind;
 
 /**
  * The payout method kind's question and answer types, held to Siren's own
@@ -14,14 +14,14 @@ use Siren\Sdk\AppItemKind;
  * (6d2abd936a), and the payoutMethod request in
  * tests/Fixtures/apps-feature-contracts/requests.json.
  *
- * @phpstan-import-type AppPayoutQuestion from AppItemKind
- * @phpstan-import-type AppPayoutAnswer from AppItemKind
+ * @phpstan-import-type AppPayoutQuestion from FeatureKind
+ * @phpstan-import-type AppPayoutAnswer from FeatureKind
  */
 final class AppPayoutMethodTest extends TestCase
 {
     private static function source(): string
     {
-        return (string) file_get_contents((string) (new ReflectionClass(AppItemKind::class))->getFileName());
+        return (string) file_get_contents((string) (new ReflectionClass(FeatureKind::class))->getFileName());
     }
 
     /** @return array<string, mixed> Siren's own payoutMethod question, from the contracts fixture. */
@@ -53,8 +53,8 @@ final class AppPayoutMethodTest extends TestCase
 
     public function testTheKindIsAnAsk(): void
     {
-        $this->assertSame('payoutMethod', AppItemKind::PAYOUT_METHOD);
-        $this->assertContains(AppItemKind::PAYOUT_METHOD, AppItemKind::ASKS);
+        $this->assertSame('payoutMethod', FeatureKind::PAYOUT_METHOD);
+        $this->assertContains(FeatureKind::PAYOUT_METHOD, FeatureKind::ASKS);
     }
 
     public function testTheFeatureKindTypesThePayoutQuestionAsSirenBuildsIt(): void

@@ -214,7 +214,7 @@ final class AppRequestDxTest extends TestCase
         $checked = $this->mockSiren([])->apps->verifyRequest($request->rawBody, $request->headers, self::SECRET);
 
         $this->assertSame('ask', $checked->mode);
-        $this->assertSame(['kind' => 'distributionResolver', 'key' => 'split-by-score'], array_intersect_key($checked->item, ['kind' => 1, 'key' => 1]));
+        $this->assertSame(['kind' => 'distributionResolver', 'key' => 'split-by-score'], array_intersect_key($checked->feature, ['kind' => 1, 'key' => 1]));
         $this->assertMatchesRegularExpression('/^apr_[0-9a-f]{32}$/', $checked->id);
         $this->assertSame(AppRequests::sampleData('distributionResolver'), $checked->data);
         $this->assertSame('https://api.sirenaffiliates.com/siren/v1/apps/requests/' . $checked->id . '/answer', $checked->answerUrl);
@@ -354,10 +354,10 @@ final class AppRequestDxTest extends TestCase
             'type' => [static fn (array $b): array => ['type' => 'app.ask'] + $b, 'its `type` must be `app.request`'],
             'mode' => [static fn (array $b): array => ['mode' => 'maybe'] + $b, 'its `mode` must be `tell` or `ask`'],
             'app' => [static fn (array $b): array => ['app' => ''] + $b, "its `app` must be the app's key"],
-            'item' => [static fn (array $b): array => ['item' => 'x'] + $b, 'its `item` must be an object'],
-            'item.kind' => [static fn (array $b): array => ['item' => ['key' => 'k', 'id' => 'app:1']] + $b, 'its `item.kind` must be text'],
-            'item.key' => [static fn (array $b): array => ['item' => ['kind' => 'k', 'id' => 'app:1']] + $b, 'its `item.key` must be text'],
-            'item.id' => [static fn (array $b): array => ['item' => ['kind' => 'k', 'key' => 'k']] + $b, 'its `item.id` must be text'],
+            'feature' => [static fn (array $b): array => ['feature' => 'x'] + $b, 'its `feature` must be an object'],
+            'feature.kind' => [static fn (array $b): array => ['feature' => ['key' => 'k', 'id' => 'app:1']] + $b, 'its `feature.kind` must be text'],
+            'feature.key' => [static fn (array $b): array => ['feature' => ['kind' => 'k', 'id' => 'app:1']] + $b, 'its `feature.key` must be text'],
+            'feature.id' => [static fn (array $b): array => ['feature' => ['kind' => 'k', 'key' => 'k']] + $b, 'its `feature.id` must be text'],
             'createdAt' => [static fn (array $b): array => ['createdAt' => 5] + $b, 'its `createdAt` must be a date as text'],
             'data' => [static fn (array $b): array => ['data' => [1, 2]] + $b, 'its `data` must be an object'],
             'answerBy' => [static fn (array $b): array => ['answerBy' => null] + $b, 'an ask\'s `answerBy` must be a date as text'],

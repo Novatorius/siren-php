@@ -57,7 +57,8 @@
     },
     "scripts": {
         "test": "phpunit",
-        "lint": "phpstan analyse --no-progress"
+        "lint": "phpstan analyse --no-progress",
+        "feature-kinds": "@php bin/feature-kinds.php"
     },
     "config": {
         "sort-packages": true

@@ -62,7 +62,7 @@ final class AppsTest extends TestCase
         $this->assertSame('ask', $request->mode);
         $this->assertTrue($request->isAsk());
         $this->assertSame('acme-payouts', $request->app);
-        $this->assertSame(['kind' => 'payoutMethod', 'key' => 'acme-ledger', 'id' => 'app:12'], $request->item);
+        $this->assertSame(['kind' => 'payoutMethod', 'key' => 'acme-ledger', 'id' => 'app:12'], $request->feature);
         $this->assertSame(['payoutId' => 88, 'amount' => 2500, 'currency' => 'USD'], $request->data);
         $this->assertSame('2026-11-18T09:14:03+00:00', $request->answerBy);
         $this->assertSame('https://api.siren.test/siren/v1/apps/requests/apr_b79943ff8ca353ce5cf5312bb3fa66c7/answer', $request->answerUrl);
@@ -182,7 +182,7 @@ final class AppsTest extends TestCase
             'an id that is not a request key' => [['id' => 'apr_123'] + $good],
             'another type' => [['type' => 'conversion.approved'] + $good],
             'no app' => [['app' => ''] + $good],
-            'an item with no kind' => [['item' => ['key' => 'k', 'id' => 'app:1']] + $good],
+            'a feature with no kind' => [['feature' => ['key' => 'k', 'id' => 'app:1']] + $good],
             'a list for data' => [['data' => [1, 2]] + $good],
             'another mode' => [['mode' => 'maybe'] + $good],
             'an ask with no answer address' => [(static function (array $body): array {

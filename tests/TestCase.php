@@ -72,7 +72,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         $contracts = json_decode((string) file_get_contents(__DIR__ . '/Fixtures/apps-feature-contracts/requests.json'), true, 512, JSON_THROW_ON_ERROR);
         $request = $contracts['kinds'][$kind]['request'];
 
-        return \Siren\Sdk\Testing\AppRequests::make($kind, $request['item']['key'], [
+        return \Siren\Sdk\Testing\AppRequests::make($kind, $request['feature']['key'], [
             'secret' => $secret,
             'id' => $request['id'],
             'app' => $request['app'],

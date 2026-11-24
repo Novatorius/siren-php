@@ -257,13 +257,13 @@ until the worker stops. With `runLater`, `answer()` hands the work to it and
 
 `on($kind, $key, $fn)` registers one feature, and `on($kind, $fn)` every
 feature of a kind. A function for the key wins. Each function gets the
-`AppRequest`, whose `id`, `mode`, `item` (`kind`, `key` and `id`) and `data`
+`AppRequest`, whose `id`, `mode`, `feature` (`kind`, `key` and `id`) and `data`
 hold what Siren sent. A tell's return value is not read. An ask's function
 returns the answer as an array, or `$answers->later()` when the app will
 answer later with `apps->requests->answer()`. An ask's function that returns
 nothing is an error, which `onError` hears, and nothing is posted.
 
-`on()` takes the thirteen kinds Siren sends, `AppItemKind::SENT`, and refuses
+`on()` takes the thirteen kinds Siren sends, `FeatureKind::SENT`, and refuses
 any other at once with an `InvalidArgumentException` that says what to write
 instead. A typo gets the kind it's closest to, a screen name such as
 `attributionModel` gets its kind, `incentiveResolver`, and a webhook event
@@ -293,7 +293,7 @@ its signature and time, as it checks an app request.
 Every reply is JSON with `Cache-Control: no-store`, and no reply holds the
 secret or the body. Siren waits 8 seconds for a reply. The handler keeps no
 state, and Siren may deliver one request twice, so a tell's function writes
-once by `$request->id`. That id is the same on every send. `item['id']` names
+once by `$request->id`. That id is the same on every send. `feature['id']` names
 the feature and `deliveryId` changes on every send, so neither one serves.
 
 An ask's function can also run more than once for one request: on a repeat
@@ -318,14 +318,21 @@ sample question, a pool of 10000 with scores 30 and 20, it gives
 ## Feature kinds
 
 Each heading below is the name Siren Cloud's screens give the kind, with the
-kind's value, which `$request->item['kind']` carries and `AppItemKind` names.
-`AppItemKind` also sorts the kinds into `TELLS` and `ASKS`, gives each one's
+kind's value, which `$request->feature['kind']` carries and `FeatureKind` names.
+`FeatureKind` also sorts the kinds into `TELLS` and `ASKS`, gives each one's
 screen name in `NAMES`, and holds the shape of each question and answer as
 PHPStan types, for `@phpstan-import-type`:
 
 ```php
-/** @phpstan-import-type AppDistributionAnswer from \Siren\Sdk\AppItemKind */
+/** @phpstan-import-type AppDistributionAnswer from \Siren\Sdk\FeatureKind */
 ```
+
+The kinds and their names come from Siren's own list of kinds, which this
+package ships as `resources/app-kinds.json`. `FeatureKind::catalog()` reads
+it: each kind's screen name, Siren's own term for it, a description, and
+whether Siren tells it, asks it or receives it from the app. Hover a
+constant such as `FeatureKind::INCENTIVE_RESOLVER` and your editor shows its
+screen name, Attribution model.
 
 Every amount in a question or an answer is the stored whole number, so 1500
 in US dollars is $15.00. Divide by 10 to the power of the currency's `scale`
@@ -855,7 +862,7 @@ The request Siren signs is this envelope, with the kind's question in `data`.
 
 ```json
 {"version": 1, "id": "apr_9c60190a4501399d0ae55f041c237b39", "type": "app.request", "mode": "ask",
- "app": "acme-crm", "item": {"kind": "distributionResolver", "key": "split-by-score", "id": "app:9"},
+ "app": "acme-crm", "feature": {"kind": "distributionResolver", "key": "split-by-score", "id": "app:9"},
  "createdAt": "2026-11-17T12:20:03+00:00", "answerBy": "2026-11-17T13:20:03+00:00",
  "answerUrl": "https://cloud.example.com/siren/v1/apps/requests/apr_9c60190a4501399d0ae55f041c237b39/answer",
  "data": {}}
@@ -1564,6 +1571,7 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `apps->requestHandler($signingSecret, $options)`, with `on`, `onEvent`, `serve`, `psr15`, `answer` and `simulate`. The secret defaults to `SIREN_SIGNING_SECRET`. | `siren.apps.requestHandler(options)`, with `on`, `onEvent`, `handle`, `simulate` and its Node, Web and Fastify mounts | `POST /apps/requests/{id}/answer` for an ask's answer, to the client's `baseUrl` only | the app's key |
 | `$answers->later()`, which an ask's function returns to answer later. Returning nothing is an error. | `answers.later()` | none | none |
 | The `extraKinds` option, kinds `on()` takes beyond the thirteen Siren sends today. `on()` refuses any other kind. | The `extraKinds` option | none | none |
+| `FeatureKind`, with `SENT`, `TELLS`, `ASKS`, `NAMES` and `catalog()`, from Siren's kinds snapshot | `FeatureKind` | `GET /apps/kinds` serves the same kinds | none |
 | `Siren\Sdk\Testing\AppRequests::make($kind, $key, $options)`, `AppRequests::sampleData($kind)` | `appRequest(kind, key, options)`, `sampleData(kind)` from `@novatorius/siren/testing` | none | none |
 | `new Siren()` reads `SIREN_API_KEY` | `new Siren()` reads `SIREN_API_KEY` | none | none |
 | `Apps::splitPool($pool, $weights)` | `siren.apps.splitPool(pool, weights)` | none | none |

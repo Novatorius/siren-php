@@ -5,15 +5,18 @@ declare(strict_types=1);
 namespace Siren\Sdk;
 
 /**
- * The kinds of feature an app can add, as Siren stores them in an item's
- * `kind` and sends them in an app request's `item.kind`, and the shape of
- * each kind's question, the request's `data`, and answer. Compare
- * {@see AppRequest::$item} against these to pick the code that answers.
+ * The kinds of feature an app can add, as Siren sends them in an app
+ * request's `feature.kind`, and the shape of each kind's question, the
+ * request's `data`, and answer. Compare {@see AppRequest::$feature} against
+ * these to pick the code that answers.
  *
+ * The kinds and their names come from Siren's kinds snapshot, which this
+ * package ships byte for byte as resources/app-kinds.json and
+ * {@see catalog()} reads. bin/feature-kinds.php writes the first line of each
+ * constant's docs and the {@see SENT}, {@see TELLS}, {@see ASKS} and
+ * {@see NAMES} lists from it, in the order of Siren's "New feature" chooser.
  * {@see SENT} lists the thirteen kinds Siren sends requests for, the kinds
- * {@see AppRequestHandler::on()} takes, in the order of Siren's own list
- * (APP_KINDS in Siren's frontend/src/platform/saas/apps/apps.ts).
- * {@see TELLS} and {@see ASKS} sort them, and {@see NAMES} gives the name
+ * {@see AppRequestHandler::on()} takes, and {@see NAMES} gives the name
  * Siren Cloud's screens show for each. `customEvent` is the one kind Siren
  * sends nothing, since the app sends it. Siren's own builders make the
  * questions (lib/Apps/Service in Siren). Every amount is the stored integer,
@@ -22,7 +25,7 @@ namespace Siren\Sdk;
  * PHPStan and Psalm read the shapes with `@phpstan-import-type`:
  *
  * ```php
- * /** @phpstan-import-type AppDistributionAnswer from AppItemKind *\/
+ * /** @phpstan-import-type AppDistributionAnswer from FeatureKind *\/
  * ```
  *
  * @phpstan-type AppCurrency array{id: string, symbol: string, position: string, name: string, scale: int, decimalPlaces: int, type: string}
@@ -177,15 +180,22 @@ namespace Siren\Sdk;
  * }
  * @phpstan-type AppCollaboratorGroupStructureAnswer array{outcome: 'structure', shape: 'chain', order: list<int>}|array{outcome: 'structure', shape: 'tree', parents: array<int|string, int|null>}
  */
-final class AppItemKind
+final class FeatureKind
 {
+    /** @var list<array{kind: string, term: string, name: string, description: string, mode: string, direction: string}>|null */
+    private static ?array $catalog = null;
+
     /**
+     * Post-conversion action.
+     *
      * A tell after each approved conversion, picked on a program. The
      * question is an `AppConversionTell`. Nothing is answered.
      */
     public const POST_CONVERSION_ACTION = 'postConversionAction';
 
     /**
+     * Post-allocation action.
+     *
      * A tell after a completed allocation gives a collaborator a share,
      * picked on a distributor. The question is an `AppAllocationTell`.
      * Nothing is answered.
@@ -193,6 +203,8 @@ final class AppItemKind
     public const POST_ALLOCATION_ACTION = 'postAllocationAction';
 
     /**
+     * Payout method.
+     *
      * An ask to pay one payout, picked on an autofulfiller for a currency
      * the feature names. The question is an `AppPayoutQuestion`, and
      * the answer an `AppPayoutAnswer`. The question holds the payout's id, its
@@ -208,6 +220,8 @@ final class AppItemKind
     public const PAYOUT_METHOD = 'payoutMethod';
 
     /**
+     * Distribution resolver.
+     *
      * An ask for how to divide a distribution's pool, picked on a
      * distributor. The question is an `AppDistributionQuestion`, and the
      * answer an `AppDistributionAnswer`: one share per metric, each a whole
@@ -217,6 +231,8 @@ final class AppItemKind
     public const DISTRIBUTION_RESOLVER = 'distributionResolver';
 
     /**
+     * Attribution model. Siren's own term: incentive resolver.
+     *
      * An ask to split a sale's reward among the collaborators it converted,
      * picked on a program. The question is an `AppRewardQuestion`, and the
      * answer an `AppRewardAnswer`, such as
@@ -230,6 +246,8 @@ final class AppItemKind
     public const INCENTIVE_RESOLVER = 'incentiveResolver';
 
     /**
+     * Incentive structure. Siren's own term: incentive type.
+     *
      * An ask which engagements one sale, lead or renewal converts, picked on
      * a program as its incentive type. The question is an
      * `AppIncentiveTypeQuestion`: the program, the transaction (null for a
@@ -244,6 +262,8 @@ final class AppItemKind
     public const INCENTIVE_TYPE = 'incentiveType';
 
     /**
+     * Metric calculation. Siren's own term: calculation strategy.
+     *
      * An ask to score a metric for a distributor, picked on a distributor's
      * metric type. The question is an `AppMetricCalculationQuestion`, and the
      * answer an `AppMetricCalculationAnswer`, such as
@@ -255,6 +275,8 @@ final class AppItemKind
     public const METRIC_CALCULATION = 'metricCalculation';
 
     /**
+     * Customer filter for distributors. Siren's own term: metric filter.
+     *
      * An ask whether one collaborator's metric counts, picked on a
      * distributor. The question is an `AppMetricFilterQuestion`, and the
      * answer an `AppMetricFilterAnswer`: `['outcome' => 'allow']`, or
@@ -264,6 +286,8 @@ final class AppItemKind
     public const METRIC_FILTER = 'metricFilter';
 
     /**
+     * Transaction filter. Siren's own term: transaction compiler.
+     *
      * An ask for which of a sale's own lines count, once per sale for each
      * program or distributor that picks the filter. Siren's catalog calls it
      * a transaction compiler. The subject id is
@@ -282,6 +306,8 @@ final class AppItemKind
     public const TRANSACTION_FILTER = 'transactionFilter';
 
     /**
+     * Engagement calculation. Siren's own term: calculation strategy.
+     *
      * An ask who earns an engagement, and its score, picked on a program's
      * engagement type. The question is an `AppEngagementCalculationQuestion`
      * and the answer an `AppEngagementCalculationAnswer`, such as
@@ -296,6 +322,8 @@ final class AppItemKind
     public const ENGAGEMENT_CALCULATION = 'engagementCalculation';
 
     /**
+     * Customer filter for programs. Siren's own term: engagement filter.
+     *
      * An ask whether an engagement may be made for one collaborator, picked
      * on a program. The question is an `AppEngagementFilterQuestion`, which
      * names the collaborator the engagement would credit, and the answer an
@@ -306,6 +334,8 @@ final class AppItemKind
     public const ENGAGEMENT_FILTER = 'engagementFilter';
 
     /**
+     * Program group structure. Siren's own term: group sorter.
+     *
      * An ask for the order to try a program group's programs in for one sale
      * or lead, picked on a program group as its structure. The question is an
      * `AppGroupOrderQuestion`: the group's programs that take the
@@ -319,6 +349,8 @@ final class AppItemKind
     public const PROGRAM_GROUP_SORTER = 'programGroupSorter';
 
     /**
+     * Collaborator group structure.
+     *
      * An ask for a collaborator group's shape among the members in the
      * question, once per cascade trigger on the group, for a program (an
      * engagement cascade) or a distributor (a metric cascade). The question
@@ -337,24 +369,26 @@ final class AppItemKind
      */
     public const COLLABORATOR_GROUP_STRUCTURE = 'collaboratorGroupStructure';
 
-    /** An event of the app's own, which the app sends Siren. Siren sends it nothing. */
+    /**
+     * Custom event.
+     *
+     * An event of the app's own, which the app sends Siren. Siren sends it nothing.
+     */
     public const CUSTOM_EVENT = 'customEvent';
 
-    /**
-     * The thirteen kinds Siren sends requests for, in Siren's order, which
-     * {@see AppRequestHandler::on()} takes. A test holds them equal to
-     * Siren's APP_KINDS.
-     */
+    // generated:start, by bin/feature-kinds.php from resources/app-kinds.json
+
+    /** The kinds Siren sends requests for, the snapshot's tells and asks in its order, which {@see AppRequestHandler::on()} takes. */
     public const SENT = [
         self::POST_CONVERSION_ACTION,
         self::POST_ALLOCATION_ACTION,
         self::PAYOUT_METHOD,
         self::DISTRIBUTION_RESOLVER,
-        self::INCENTIVE_RESOLVER,
-        self::INCENTIVE_TYPE,
         self::METRIC_CALCULATION,
         self::METRIC_FILTER,
+        self::INCENTIVE_RESOLVER,
         self::TRANSACTION_FILTER,
+        self::INCENTIVE_TYPE,
         self::ENGAGEMENT_CALCULATION,
         self::ENGAGEMENT_FILTER,
         self::PROGRAM_GROUP_SORTER,
@@ -362,17 +396,20 @@ final class AppItemKind
     ];
 
     /** The kinds Siren tells, which wait for no answer. */
-    public const TELLS = [self::POST_CONVERSION_ACTION, self::POST_ALLOCATION_ACTION];
+    public const TELLS = [
+        self::POST_CONVERSION_ACTION,
+        self::POST_ALLOCATION_ACTION,
+    ];
 
-    /** The kinds Siren asks, which wait for an answer, in Siren's order. */
+    /** The kinds Siren asks, which wait for an answer. */
     public const ASKS = [
         self::PAYOUT_METHOD,
         self::DISTRIBUTION_RESOLVER,
-        self::INCENTIVE_RESOLVER,
-        self::INCENTIVE_TYPE,
         self::METRIC_CALCULATION,
         self::METRIC_FILTER,
+        self::INCENTIVE_RESOLVER,
         self::TRANSACTION_FILTER,
+        self::INCENTIVE_TYPE,
         self::ENGAGEMENT_CALCULATION,
         self::ENGAGEMENT_FILTER,
         self::PROGRAM_GROUP_SORTER,
@@ -385,17 +422,39 @@ final class AppItemKind
         self::POST_ALLOCATION_ACTION => 'Post-allocation action',
         self::PAYOUT_METHOD => 'Payout method',
         self::DISTRIBUTION_RESOLVER => 'Distribution resolver',
-        self::INCENTIVE_RESOLVER => 'Attribution model',
-        self::INCENTIVE_TYPE => 'Incentive structure',
+        self::CUSTOM_EVENT => 'Custom event',
         self::METRIC_CALCULATION => 'Metric calculation',
         self::METRIC_FILTER => 'Customer filter for distributors',
+        self::INCENTIVE_RESOLVER => 'Attribution model',
         self::TRANSACTION_FILTER => 'Transaction filter',
+        self::INCENTIVE_TYPE => 'Incentive structure',
         self::ENGAGEMENT_CALCULATION => 'Engagement calculation',
         self::ENGAGEMENT_FILTER => 'Customer filter for programs',
         self::PROGRAM_GROUP_SORTER => 'Program group structure',
         self::COLLABORATOR_GROUP_STRUCTURE => 'Collaborator group structure',
-        self::CUSTOM_EVENT => 'Custom event',
     ];
+
+    // generated:end
+
+    /**
+     * Siren's kinds snapshot as this package ships it: one entry per kind,
+     * in the order of Siren's "New feature" chooser, each with its `kind`,
+     * Siren's own `term`, the `name` its screens show, a `description`, its
+     * `mode` (`tell`, `ask` or `receive`) and its `direction` (`out` or
+     * `in`). `GET /apps/kinds` serves the same fields from a running Siren.
+     *
+     * @return list<array{kind: string, term: string, name: string, description: string, mode: string, direction: string}>
+     */
+    public static function catalog(): array
+    {
+        if (self::$catalog === null) {
+            /** @var list<array{kind: string, term: string, name: string, description: string, mode: string, direction: string}> $kinds */
+            $kinds = json_decode((string) file_get_contents(dirname(__DIR__) . '/resources/app-kinds.json'), true, 512, JSON_THROW_ON_ERROR);
+            self::$catalog = $kinds;
+        }
+
+        return self::$catalog;
+    }
 
     /** Whether Siren waits for an answer to a request of this kind. */
     public static function isAsk(string $kind): bool

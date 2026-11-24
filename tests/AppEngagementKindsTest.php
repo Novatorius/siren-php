@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Siren\Sdk\Tests;
 
-use Siren\Sdk\AppItemKind;
+use Siren\Sdk\FeatureKind;
 
 /**
  * Slice C16-4: the engagement calculation and engagement filter kinds, and
@@ -18,12 +18,12 @@ final class AppEngagementKindsTest extends TestCase
 
     public function testTheKindsMatchTheValuesSirenStoresAndAreAsks(): void
     {
-        $this->assertSame('engagementCalculation', AppItemKind::ENGAGEMENT_CALCULATION);
-        $this->assertSame('engagementFilter', AppItemKind::ENGAGEMENT_FILTER);
-        $this->assertSame('engagementCalculation', AppItemKind::ENGAGEMENT_CALCULATION);
-        $this->assertSame('engagementFilter', AppItemKind::ENGAGEMENT_FILTER);
-        $this->assertContains(AppItemKind::ENGAGEMENT_CALCULATION, AppItemKind::ASKS);
-        $this->assertContains(AppItemKind::ENGAGEMENT_FILTER, AppItemKind::ASKS);
+        $this->assertSame('engagementCalculation', FeatureKind::ENGAGEMENT_CALCULATION);
+        $this->assertSame('engagementFilter', FeatureKind::ENGAGEMENT_FILTER);
+        $this->assertSame('engagementCalculation', FeatureKind::ENGAGEMENT_CALCULATION);
+        $this->assertSame('engagementFilter', FeatureKind::ENGAGEMENT_FILTER);
+        $this->assertContains(FeatureKind::ENGAGEMENT_CALCULATION, FeatureKind::ASKS);
+        $this->assertContains(FeatureKind::ENGAGEMENT_FILTER, FeatureKind::ASKS);
     }
 
     /**

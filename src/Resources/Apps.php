@@ -310,7 +310,7 @@ final class Apps
             type: $body['type'],
             mode: $body['mode'],
             app: $body['app'],
-            item: $body['item'],
+            feature: $body['feature'],
             createdAt: $body['createdAt'],
             answerBy: is_string($body['answerBy'] ?? null) ? $body['answerBy'] : null,
             answerUrl: is_string($body['answerUrl'] ?? null) ? $body['answerUrl'] : null,
@@ -373,7 +373,7 @@ final class Apps
             return 'the body must be a JSON object';
         }
 
-        $item = $body['item'] ?? null;
+        $feature = $body['feature'] ?? null;
         $mode = $body['mode'] ?? null;
         $isObject = static fn (mixed $value): bool => is_array($value) && ($value === [] || !array_is_list($value));
 
@@ -384,10 +384,10 @@ final class Apps
             ($body['type'] ?? null) !== self::REQUEST_EVENT => 'its `type` must be `app.request`',
             $mode !== 'tell' && $mode !== 'ask' => 'its `mode` must be `tell` or `ask`',
             !is_string($body['app'] ?? null) || $body['app'] === '' => "its `app` must be the app's key, as text",
-            !$isObject($item) => 'its `item` must be an object with the feature\'s kind, key and id',
-            !is_string($item['kind'] ?? null) => 'its `item.kind` must be text, such as distributionResolver',
-            !is_string($item['key'] ?? null) => "its `item.key` must be text, the feature's key",
-            !is_string($item['id'] ?? null) => 'its `item.id` must be text, such as app:12',
+            !$isObject($feature) => 'its `feature` must be an object with the feature\'s kind, key and id',
+            !is_string($feature['kind'] ?? null) => 'its `feature.kind` must be text, such as distributionResolver',
+            !is_string($feature['key'] ?? null) => "its `feature.key` must be text, the feature's key",
+            !is_string($feature['id'] ?? null) => 'its `feature.id` must be text, such as app:12',
             !is_string($body['createdAt'] ?? null) => 'its `createdAt` must be a date as text, in ISO 8601',
             !$isObject($body['data'] ?? null) => 'its `data` must be an object, the question',
             $mode === 'ask' && !is_string($body['answerBy'] ?? null) => "an ask's `answerBy` must be a date as text, in ISO 8601",

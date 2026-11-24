@@ -113,7 +113,7 @@ final class AppRequests
             'type' => Apps::REQUEST_EVENT,
             'mode' => $mode,
             'app' => $options['app'] ?? self::DEFAULT_APP,
-            'item' => ['kind' => $kind, 'key' => $key, 'id' => 'app:1'],
+            'feature' => ['kind' => $kind, 'key' => $key, 'id' => 'app:1'],
             'createdAt' => $at->format(DATE_ATOM),
         ];
 
