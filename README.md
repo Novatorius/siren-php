@@ -519,7 +519,8 @@ engagement calculation's, typed as
 An ask. Siren asks it when it sends a payout in a currency whose
 autofulfiller picks this payout method, after payouts are made and when
 someone sends or retries one. The feature names the currencies it pays in,
-and the payout shows as processing until the answer. `data` holds:
+and the payout shows as processing until the answer. `data` is an
+`AppPayoutQuestion` and holds:
 
 - `payout`: its `id`, the `fulfillmentId` it belongs to, and `attempt`, which
   starts at 1 and rises when Siren asks again about the same payout, such as
@@ -536,9 +537,10 @@ and the payout shows as processing until the answer. `data` holds:
  "collaborator": {"id": 42, "name": "Ana Ruiz", "email": "ana@example.com"}}
 ```
 
-The answer is `['outcome' => 'paid', 'reference' => '...']`, with the
-payment's id in your own system of 1 to 191 characters, or
-`['outcome' => 'failed', 'reason' => '...']` of 1 to 500 characters, which
+The answer is an `AppPayoutAnswer`. An `AppPayoutPaidAnswer` is
+`['outcome' => 'paid', 'reference' => '...']`, with the payment's id in your
+own system of 1 to 191 characters. An `AppPayoutFailedAnswer` is
+`['outcome' => 'failed', 'reason' => '...']`, with 1 to 500 characters, which
 marks the payout failed so someone can send it again. Pay each payout id at
 most once, and when Siren asks again about a payout you already paid, answer
 `paid` with the first reference.

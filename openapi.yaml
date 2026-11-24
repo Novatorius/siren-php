@@ -102,6 +102,8 @@ tags:
     description: The organization settings Siren shares with a connected site.
   - name: Collaborator Groups
     description: Named sets of collaborators that programs and distributors target.
+  - name: Apps
+    description: The routes a Siren app's own code calls with its key, to answer Siren's asks and to trade its key for a short-lived token.
 paths:
   /event/sale:
     post:
@@ -218,10 +220,16 @@ paths:
         such as `sale-triggered`, and those need their exact `event:{slug}`
         scope on an API key, because no wildcard reaches them. Most events
         answer with no body.
+
+        An app's custom event takes only a short-lived token of the owning
+        app, never its key: a server token or a browser token from
+        `POST /oauth/token`, sent as a bearer or, from a page, in the
+        `access_token` query parameter.
       security:
         - apiKey: []
         - connectorToken: []
         - dashboardSession: []
+        - appToken: []
       parameters:
         - name: eventSlug
           in: path
@@ -250,6 +258,130 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /apps/requests/{requestKey}/answer:
+    post:
+      tags: [Apps]
+      operationId: answerAppRequest
+      summary: Answer an ask
+      description: |
+        Takes an app's answer to an ask Siren sent it. The app sends its own
+        API key, which needs no scope and answers only a request Siren sent
+        its own app. A signed-in admin may answer by hand, but only a request
+        that needs attention. The body is the answer, a JSON object with a
+        text `outcome`, at most 16384 bytes. `AppRequests::answer()` sends it
+        once, and the request handler sends the same answer again after a
+        lost connection, a 429 or a 5xx.
+
+        Siren takes each answer once. The same answer again answers
+        `duplicate: true` and applies nothing. Each refusal carries its code
+        in `error.code`: 403 `app_inactive` or `app_answer_forbidden`, 404
+        `app_request_not_found`, which an organization key that is no app's
+        also gets, 409 `app_request_already_answered` for a different answer
+        after one was accepted, 409 `app_request_dropped` once Siren stopped
+        waiting because the work waited more than 24 hours, 409
+        `app_request_not_needing_attention` for a person's answer to an ask
+        that does not need attention, and 422 `app_answer_invalid` with the
+        reason. A missing or unknown bearer gets 401 from the key check every
+        route shares, with no code, and the SDK reads it as
+        `app_answer_unauthorized`.
+      security:
+        - apiKey: []
+        - dashboardSession: []
+      parameters:
+        - name: requestKey
+          in: path
+          required: true
+          description: The request's `id` from the envelope Siren sent.
+          schema: { type: string, pattern: '^apr_[0-9a-f]{32}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppAnswer' }
+      responses:
+        '200':
+          description: The answer was accepted, now or before.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppAnswerReceipt' }
+              examples:
+                accepted: { value: { status: accepted } }
+                duplicate: { value: { status: accepted, duplicate: true } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`error.code` is `app_inactive` or `app_answer_forbidden`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`error.code` is `app_request_not_found`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`error.code` is `app_request_already_answered`, `app_request_dropped` or `app_request_not_needing_attention`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`error.code` is `app_answer_invalid`, and `error.message` says why the answer does not fit the question.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /oauth/token:
+    post:
+      tags: [Apps]
+      operationId: requestAppToken
+      summary: Trade an app's key for a short-lived token
+      description: |
+        The `client_credentials` grant an app uses before it sends its own
+        custom events, which take a token, never the key. `client_secret` is
+        the app's key. `client_id`, when sent, must be the app's key word.
+        With no `scope` Siren answers a server token that lasts 1200 seconds.
+        With `scope: browser:{eventKey}` it answers a browser token for that
+        one custom event, lasting 600 seconds, and refuses it while the event
+        allows no domain. `Auth\AppTokens` keeps each token and asks again
+        when it is close to ending. The same route serves connected sites'
+        other grants, which this SDK does not send.
+
+        A refusal is a 400, 401 or 503 with the RFC 6749 error envelope,
+        `error` and `error_description`: 400 `invalid_request` without a
+        `client_secret`, 400 `unauthorized_client` for a key that is no
+        app's, 400 `invalid_scope` for another scope, an event the app does
+        not have or one that allows no domain, 400 `unsupported_grant_type`,
+        401 `invalid_client` for an unknown or revoked key, a deleted app or
+        another `client_id`, and 503 `temporarily_unavailable`. App grants
+        have their own rate limit, 600 an hour.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [grant_type, client_secret]
+              properties:
+                grant_type: { type: string, enum: [client_credentials] }
+                client_secret: { type: string, description: 'The app''s API key.' }
+                client_id: { type: string, description: 'The app''s key word, or left out.' }
+                scope: { type: string, description: 'Left out for a server token, or `browser:{eventKey}` for a browser token.' }
+      responses:
+        '200':
+          description: A short-lived token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in]
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, enum: [Bearer] }
+                  expires_in: { type: integer, description: '1200 for a server token, 600 for a browser token.' }
+                  scope: { type: string, description: 'The browser scope, on a browser token only.' }
+        '400': { $ref: '#/components/responses/OAuthRefused' }
+        '401': { $ref: '#/components/responses/OAuthRefused' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/OAuthRefused' }
   /ping:
     get:
       tags: [Events]
@@ -2701,6 +2833,15 @@ components:
         The access token of a person signed in to the Siren dashboard. Some
         routes need the admin role, and refuse other roles with a 403 whose
         code is `admin_required`.
+    appToken:
+      type: http
+      scheme: bearer
+      description: |
+        A short-lived token of a Siren app, from `POST /oauth/token`. A
+        server token lasts 1200 seconds and sends the app's custom events. A
+        browser token lasts 600 seconds, sends one custom event, and is taken
+        only from a page on the event's allowed domains, often as the
+        `access_token` query parameter.
     connectorToken:
       type: http
       scheme: bearer
@@ -3123,6 +3264,22 @@ components:
         resource: { type: string, example: ledger }
         action: { type: string, example: 'conversions:read' }
         label: { type: string, example: Read conversions }
+    AppAnswer:
+      type: object
+      description: |
+        An answer to an ask, at most 16384 bytes of JSON. Its shape depends on
+        the feature's kind, as `AppFeatureKind` types it, and every answer
+        carries a text `outcome`.
+      required: [outcome]
+      properties:
+        outcome: { type: string }
+      additionalProperties: true
+    AppAnswerReceipt:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [accepted] }
+        duplicate: { type: boolean, description: 'True when Siren had already taken this same answer.' }
     Error:
       type: object
       description: |
@@ -3191,6 +3348,16 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    OAuthRefused:
+      description: 'The RFC 6749 error envelope: `error` is the code and `error_description` says why.'
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error: { type: string }
+              error_description: { type: string }
     Unauthorized:
       description: |
         Missing, invalid, expired or revoked credential. A valid API key sent

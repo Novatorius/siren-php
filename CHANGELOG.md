@@ -27,6 +27,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AppFeatureKind::PAYOUT_METHOD` (`payoutMethod`) in `ASKS`, so the request
   handler answers a payout method's ask: `['outcome' => 'paid', 'reference'
   => ...]` or `['outcome' => 'failed', 'reason' => ...]`.
+- The PHPStan types `AppPayoutQuestion` (`payout` with `id`, `fulfillmentId`
+  and `attempt`, `amount` with `value`, `units` and `currency`, and
+  `collaborator` with `id`, `name` and an `email` that may be null, as Siren
+  builds it), `AppPayoutPaidAnswer`, `AppPayoutFailedAnswer` and
+  `AppPayoutAnswer` in `AppFeatureKind`. The kind's docblock now gives that
+  question, in place of a `payoutId`, `amount` and `currency` Siren never
+  sent.
+- openapi.yaml describes `POST /apps/requests/{requestKey}/answer` with its
+  200 and duplicate receipts and each refusal (401, 403 `app_inactive` and
+  `app_answer_forbidden`, 404 `app_request_not_found`, 409
+  `app_request_already_answered`, `app_request_dropped` and
+  `app_request_not_needing_attention`, 422 `app_answer_invalid`), and
+  `POST /oauth/token` with the `client_credentials` grant an app's key
+  trades for a server or browser token. `POST /event/{eventSlug}` names the
+  app token it takes, as the new `appToken` security scheme.
 - `AppFeatureKind` holds, besides the types named below, the PHPStan types
   `AppCurrency`, `AppConversionTell`, `AppAllocationTell`,
   `AppDistributionQuestion`, `AppDistributionAnswer`, `AppRewardQuestion`,

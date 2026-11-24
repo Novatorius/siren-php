@@ -58,6 +58,14 @@ namespace Siren\Sdk;
  * @phpstan-type AppIncentiveTypeAwardAnswer array{outcome: 'award', units: string, pool: int, engagementIds: list<int>}
  * @phpstan-type AppIncentiveTypeNoneAnswer array{outcome: 'none'}
  * @phpstan-type AppIncentiveTypeAnswer AppIncentiveTypeAwardAnswer|AppIncentiveTypeNoneAnswer
+ * @phpstan-type AppPayoutQuestion array{
+ *     payout: array{id: int, fulfillmentId: int, attempt: int},
+ *     amount: array{value: int, units: string, currency: AppCurrency},
+ *     collaborator: array{id: int, name: string, email: string|null},
+ * }
+ * @phpstan-type AppPayoutPaidAnswer array{outcome: 'paid', reference: non-empty-string}
+ * @phpstan-type AppPayoutFailedAnswer array{outcome: 'failed', reason: non-empty-string}
+ * @phpstan-type AppPayoutAnswer AppPayoutPaidAnswer|AppPayoutFailedAnswer
  * @phpstan-type AppMetricCalculationQuestion array{
  *     distributor: array{id: int, name: string},
  *     distribution: array{id: int, periodEnd: string},
@@ -209,8 +217,17 @@ final class AppFeatureKind
     public const INCENTIVE_TYPE = AppItemKind::INCENTIVE_TYPE;
 
     /**
-     * An ask to pay a payout, such as `['payoutId' => 88, 'amount' => 2500, 'currency' => 'USD']`.
-     * The answer carries a text `outcome`, such as `['outcome' => 'paid', 'reference' => 'TX-1']`.
+     * An ask to pay one payout, picked on an autofulfiller for a currency
+     * the feature names. The question is an `AppPayoutQuestion`, and
+     * the answer an `AppPayoutAnswer`. The question holds the payout's id, its
+     * fulfillment and `attempt`, which rises when Siren asks again about the
+     * same payout, the amount as a whole number in the currency's smallest
+     * unit, and the collaborator's id, name and email, which is null when
+     * they have none. The answer is `['outcome' => 'paid', 'reference' =>
+     * '...']`, with the payment's id in the app's own system, at most 191
+     * characters, or `['outcome' => 'failed', 'reason' => '...']`, in plain
+     * words, at most 500. Pay each payout id at most once, and answer a
+     * second ask about a payout already paid with the first reference.
      */
     public const PAYOUT_METHOD = AppItemKind::PAYOUT_METHOD;
 
