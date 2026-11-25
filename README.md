@@ -182,6 +182,83 @@ gives the sample question alone. To try a running app, post the same
 request's `method`, `headers` and `rawBody` to its address with any HTTP
 client.
 
+`siren trigger ask` sends a test request, and `$request->test` is true for
+it. `make()` takes `'test' => true` to build one. Siren checks a test ask's
+answer with the kind's own rules and applies nothing, so a handler must
+never move money or write records on a test request. Answer it as usual, so
+Siren checks the answer, and stop there. The payout method sample answers
+`failed`, the one answer that pays nothing.
+
+A stored request becomes a test case in one line.
+`AppRequests::fromRecord($record, $key)` signs it again with its own id,
+kind, mode, question, `answerBy` and `test`. `$record` is the request as
+`siren apps requests <id>` shows it, the row `GET /apps/requests/{id}` gives,
+as an array or its JSON text. That row names the feature as `app:31`,
+without its key, so pass the key, which `siren apps show <app>` lists:
+
+<!-- readme-test: replay-a-request -->
+```php
+<?php
+use PHPUnit\Framework\TestCase;
+use Siren\Sdk\Siren;
+use Siren\Sdk\Testing\AppRequests;
+
+final class ReplayTest extends TestCase
+{
+    public function testTheStuckRequestGetsAnAnswerSirenTakes(): void
+    {
+        // The request as `siren apps requests apr_0123...` showed it.
+        $record = <<<'JSON'
+        {"id": "apr_0123456789abcdef0123456789abcdef", "feature": "app:31", "kind": "distributionResolver",
+         "mode": "ask", "status": "needs_attention", "answerBy": "2026-11-24T18:00:00+00:00",
+         "data": {"distribution": {"id": 21, "distributorId": 2, "periodStart": "2026-10-01T00:00:00+00:00", "periodEnd": "2026-11-01T00:00:00+00:00"},
+                  "distributor": {"id": 2, "name": "Partner pool"},
+                  "pool": {"value": 10000, "total": 10000, "paid": 0, "units": "USD", "currency": {"id": "USD", "symbol": "$",
+                           "position": "before", "name": "US Dollar", "scale": 2, "decimalPlaces": 2, "type": "monetary"}},
+                  "metrics": [{"metricId": 41, "collaboratorId": 42, "score": 30, "triggerCount": 3},
+                              {"metricId": 43, "collaboratorId": 57, "score": 20, "triggerCount": 2}]}}
+        JSON;
+
+        $siren = new Siren(['apiKey' => 'sk_test_unused']); // simulate() posts nothing
+        $answers = $siren->apps->requestHandler('test-secret')
+            ->on('distributionResolver', 'split-by-score', fn ($request) => [
+                'outcome' => 'allocated',
+                'units' => $request->data['pool']['units'],
+                'shares' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['metrics'], 'score', 'metricId')),
+            ]);
+
+        $result = $answers->simulate(AppRequests::fromRecord($record, 'split-by-score', ['secret' => 'test-secret']));
+
+        $this->assertNull($result->error);
+        $this->assertSame(['41' => 6000, '43' => 4000], $result->answer['shares']);
+    }
+}
+```
+
+## Develop on your machine
+
+Siren can send real requests to the handler on your laptop, with no tunnel.
+It works with a sandbox Siren only.
+
+1. Use a sandbox key, one that starts with `sk_test_`. On a sandbox,
+   `siren apps apply` needs no address for the app, and it writes the app's
+   key and signing secret to `.env.sandbox`.
+2. Run your app, such as `php -S localhost:8000 public/index.php`, then
+   `siren listen --forward-to localhost:8000/siren`. Siren sends that app's
+   asks, tells and webhook events to the handler on your machine, signed
+   with the app's own secret.
+3. Run `siren trigger ask <app> <feature>` to send the feature's sample
+   request through it now, marked as a test.
+
+`siren listen` and `siren trigger` arrive with the CLI's next release.
+
+The `siren` command comes with the Node package. Without a Node project, run
+any `siren` command in this README through npx, such as
+`npx @novatorius/siren listen --forward-to localhost:8000/siren`,
+`npx @novatorius/siren apps resend <id>`, or
+`npx @novatorius/siren apps rotate-key <app key>`, which the 401 on the
+answer route names when Siren does not accept the app's key.
+
 ## Run the handler in your app
 
 ### Mount it in a framework
@@ -229,8 +306,37 @@ $answers = $siren->apps->requestHandler(options: [ // the secret, from SIREN_SIG
     'runLater' => fn ($work) => app()->terminating($work), // where an ask's work runs after the reply
     'onError' => fn (\Throwable $error, ?object $about) => report($error), // default error_log()
     'extraKinds' => ['payoutReview'],                   // kinds a newer Siren sends that on() should take
+    'logger' => logger(),                               // a PSR-3 logger, such as Laravel's. Default error_log() at warning and above
 ]);
 ```
+
+`logger` takes your framework's PSR-3 logger. The handler writes one
+`debug` line for each request it handled, such as
+`Siren request handler: distributionResolver split-by-score apr_9c60... replied 200 in 4 ms`,
+a `warning` for a refused signature and for a tell that ran too long, and an
+`error` for the rest of what `onError` gets. Each failure is one line with
+the request's name, the error's class and code, its message, and a cause
+folded in as `(cause: ...)`. When your own function threw, the line ends
+with where, such as `(thrown at /app/src/Crm.php:41)`, and the error goes
+in the context as `exception`, so Monolog can add the stack. Without
+`logger`, warnings and errors go to `error_log()` and the debug lines go
+nowhere. A custom `onError` replaces the default warning and error lines,
+and the logger still writes the debug lines. `clock`, a function that
+returns the time in seconds, is for tests.
+
+A request whose signature fails gets its 401, and `onError` hears it as a
+`SignatureVerificationException` whose code says why: `signature_mismatch`,
+`signature_stale`, `signature_header_missing`,
+`signature_timestamp_mismatch` or `signature_header_malformed`. The default
+warning says what to check, such as ``Siren request handler: the request
+signature does not match. Check SIREN_SIGNING_SECRET: it must be this app's
+signing secret, and it changes when the secret is rotated.`` A wrong secret
+fails every request, so the default writes five refusals a minute and counts
+the rest, in one line when the next refusal after that minute comes:
+``12 more requests failed the signature check in the last minute. When every
+request fails, SIREN_SIGNING_SECRET is wrong or was rotated.`` A server that
+starts PHP fresh for each request, such as PHP-FPM, writes one line for
+each refusal.
 
 `onError` gets each failure the reply can't carry, with the `AppRequest` or
 `WebhookEvent` it came from: a function that threw, an answer that could not
@@ -241,7 +347,10 @@ after 16:58 UTC, when its answer window closes. Resend it sooner with
 `siren apps resend apr_9c60...`.`` A window that ends on another day adds
 the day, such as `after 16:58 UTC on 2026-11-18`. The command resends a
 pending ask. Siren Cloud offers Send again only once a request needs
-attention.
+attention. An answer Siren refused with 422 `app_answer_invalid` fails the
+same way on every send, so its line says instead: ``Your function's answer
+broke Siren's rule. Reproduce it with simulate() on this request's data, fix
+it, then resend with `siren apps resend apr_9c60...`.``
 
 `extraKinds` lists kinds `on()` takes beyond the thirteen this SDK knows, for
 a kind a newer Siren sends before the SDK names it.
@@ -256,6 +365,10 @@ Without `runLater`, `psr15()` finds such a server where it can and answers an
 ask 500, with `onError` told to pass `runLater`, rather than hold the answer
 until the worker stops. With `runLater`, `answer()` hands the work to it and
 `after` is null.
+
+`runLater` is your own function, so a tell's function can call it too.
+Heavy work belongs there or in your own queue: a tell must finish within 8
+seconds, and so must an event's function.
 
 ### Register functions
 
@@ -322,6 +435,40 @@ exist", `'outcome' => 'allocate'` does not fit `'allocated'`, and
 such as `conversion.approved`, as a `WebhookEvent`. The handler checks it by
 its signature and time, as it checks an app request.
 
+`AppRequests::event($type, $data)` signs a webhook event as Siren signs one
+to an app's address, and `simulate()` takes it as it takes an app request.
+With no `$data` it sends `AppRequests::sampleEventData($type)`, a payload
+with each field Siren's event catalog (`docs/api/webhooks-events.md` in
+Siren) lists for the type, filled by its type:
+
+<!-- readme-test: test-an-event -->
+```php
+<?php
+use PHPUnit\Framework\TestCase;
+use Siren\Sdk\Siren;
+use Siren\Sdk\Testing\AppRequests;
+use Siren\Sdk\WebhookEvent;
+
+final class ConversionApprovedTest extends TestCase
+{
+    public function testItNotesTheApprovedConversion(): void
+    {
+        $approved = [];
+        $siren = new Siren(['apiKey' => 'sk_test_unused']); // simulate() posts nothing
+        $answers = $siren->apps->requestHandler('test-secret')
+            ->onEvent('conversion.approved', function (WebhookEvent $event) use (&$approved) {
+                $approved[] = $event->getData()['conversionId'];
+            });
+
+        $result = $answers->simulate(AppRequests::event('conversion.approved', ['conversionId' => 7], ['secret' => 'test-secret']));
+
+        $this->assertSame(200, $result->status);
+        $this->assertNull($result->error);
+        $this->assertSame([7], $approved);
+    }
+}
+```
+
 ### What the handler replies
 
 | Request | Reply |
@@ -329,9 +476,10 @@ its signature and time, as it checks an app request.
 | Not a POST | 405 `{"error"}` |
 | A body over 1 MiB, more than Siren sends | 413 `{"error"}` |
 | A body a parser already read, so there are no bytes to check | 500 `{"error"}` that says to mount the handler before the JSON parser, or give the route a raw body. `onError` hears it too. |
-| `X-Siren-Signature-V2` missing or wrong, `X-Siren-Timestamp` different from the signed time, or a time more than `toleranceSeconds` from the clock | 401 `{"error"}` with `verifyRequest()`'s words |
+| `X-Siren-Signature-V2` missing or wrong, `X-Siren-Timestamp` different from the signed time, or a time more than `toleranceSeconds` from the clock | 401 `{"error"}` with `verifyRequest()`'s words. `onError` hears it, and the default writes a warning that says what to check. |
 | A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` naming the first field that fails, such as ``its `id` must be `apr_` followed by 32 hex characters`` |
 | A tell with a function | 200 `{}` once the function returns, or 500 when it throws, so Siren tries again about 1, 2, 4 and 8 minutes later |
+| A tell or event whose function takes over 8 seconds | A tell must finish within 8 seconds, as long as Siren waits for a reply. The reply is still 200, but Siren has stopped waiting and sends it again, so the function runs twice. `onError` hears an `AppSlowTellException`, the default writes a warning, and `simulate()` returns it as `error`. |
 | When your function fails | A tell gets 500, and Siren tries again about 1, 2, 4 and 8 minutes later. An ask already got its 200, so Siren sends it again when its answer window closes, 60 minutes by default. Resend it sooner with `siren apps resend <id>`. `onError` hears why either way. |
 | An ask whose `answerUrl` is on another Siren than the client's `baseUrl` | 500 `{"error"}` naming both addresses and the `baseUrl` to set, and `onError` hears it. Nothing runs and nothing is posted. |
 | An ask with a function | 200 `{}` at once, then the function runs and the answer it returns is posted to the client's own `baseUrl` |
@@ -709,6 +857,11 @@ most once, and when Siren asks again about a payout you already paid, answer
 <!-- readme-test: answer-payout -->
 ```php
     ->on('payoutMethod', 'acme-ledger', function ($request) {
+        if ($request->test) {
+            // A test from `siren trigger ask`: answer so Siren checks it, and pay nothing.
+            return ['outcome' => 'failed', 'reason' => 'A test request, so nothing was paid.'];
+        }
+
         // Pay each payout once, keyed by its id, and answer with your reference.
         $paid = payOnce($request->data['payout']['id'], $request->data['collaborator'], $request->data['amount']);
         return $paid['ok'] ? ['outcome' => 'paid', 'reference' => $paid['id']] : ['outcome' => 'failed', 'reason' => $paid['error']];
@@ -1677,6 +1830,12 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `apps->features->delete($appKey, $id)` | `siren.apps.features.delete(appKey, id)` | `DELETE /apps/{app}/features/{id}` | an admin's session |
 | `apps->requestHandler($signingSecret, $options)`, with `on`, `onEvent`, `serve`, `psr15`, `answer` and `simulate`. The secret defaults to `SIREN_SIGNING_SECRET`. | `siren.apps.requestHandler(options)`, with `on`, `onEvent`, `handle`, `simulate` and its Node, Web and Fastify mounts | `POST /apps/requests/{id}/answer` for an ask's answer, to the client's `baseUrl` only | the app's key |
 | `$answers->later()`, which an ask's function returns to answer later. Returning nothing is an error. | `answers.later()` | none | none |
+| `requestHandler()`'s `logger`, a PSR-3 logger | `requestHandler()`'s `logger`, anything with `debug`, `warn` and `error` | none | none |
+| `AppRequestHandler::TELL_TIME_LIMIT_SECONDS`, `AppSlowTellException` | `TELL_TIME_LIMIT_SECONDS`, `AppSlowTellError` | none | none |
+| `SignatureVerificationException` to `onError` on a refused signature | Node's signature error to `onError` | none | none |
+| `AppRequest::$test`, `AppRequests::make($kind, $key, ['test' => true])` | `request.test`, `appRequest(kind, key, { test: true })` | none | none |
+| `AppRequests::fromRecord($record, $key)` | `appRequestFromRecord(record, { key })` | none | none |
+| `AppRequests::event($type, $data)`, `AppRequests::sampleEventData($type)` | `webhookEvent(type, data)`, `sampleEventData(type)` | none | none |
 | `simulate()` returns `status`, `body`, `answer` and `error` | `simulate()` returns the same four | none | none |
 | `AppHandlerException`, a `SirenException`, for a mistake in the app's code | `AppHandlerError`, a `SirenError` | none | none |
 | PHPStan types each `on()` function by its kind, and each kind's types are named for it, such as `DistributionResolverQuestion` | TypeScript does, with the same names | none | none |

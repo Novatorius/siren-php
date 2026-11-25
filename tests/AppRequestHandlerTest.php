@@ -217,7 +217,10 @@ final class AppRequestHandlerTest extends TestCase
 
         $this->assertReply(401, $reply, $body);
         $this->assertFalse($ran);
-        $this->assertSame([], $this->errors);
+        // onError hears the refusal, so a wrong secret reaches the app's own log (pass 4, finding 1).
+        $this->assertCount(1, $this->errors);
+        $this->assertInstanceOf(\Siren\Sdk\Exception\SignatureVerificationException::class, $this->errors[0][0]);
+        $this->assertNull($this->errors[0][1]);
 
         // The words are verifyRequest's own, for the same request.
         try {

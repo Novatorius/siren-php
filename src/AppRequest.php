@@ -33,6 +33,9 @@ final class AppRequest
      * @param int $timestamp The Unix time Siren signed the send at.
      * @param string|null $deliveryId The `X-Siren-Delivery` header, when present. It names one delivery and changes on every send, so never dedupe on it.
      * @param array<string, mixed> $body The whole signed body, decoded.
+     * @param bool $test Whether this is a test request, as `siren trigger ask` sends one. Siren checks a test ask's
+     *     answer with the kind's own rules and applies nothing, so a function must never move money or write
+     *     records for it. False when the body has no `test` field, as every request that isn't a test.
      */
     public function __construct(
         public readonly int $version,
@@ -48,6 +51,7 @@ final class AppRequest
         public readonly int $timestamp,
         public readonly ?string $deliveryId,
         public readonly array $body,
+        public readonly bool $test = false,
     ) {
     }
 

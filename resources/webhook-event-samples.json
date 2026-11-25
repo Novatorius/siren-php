@@ -1,0 +1,325 @@
+{
+    "source": "Siren's docs/api/webhooks-events.md, by bin/event-samples.php. Each field holds a sample value of the type the page gives it.",
+    "events": {
+        "sale.created": {
+            "opportunityId": 101,
+            "attributed": true,
+            "source": "stripe",
+            "bindingId": "sample-bindingId"
+        },
+        "lead.created": {
+            "conversionId": 101
+        },
+        "renewal.created": {
+            "transactionId": 101
+        },
+        "collaborator.created": {
+            "collaboratorId": 101
+        },
+        "collaborator.registered": {
+            "collaboratorId": 101,
+            "source": "siren_rest_api",
+            "programIds": [
+                103
+            ],
+            "distributorIds": [
+                104
+            ],
+            "groupIds": [
+                105
+            ],
+            "approveOnSignup": true
+        },
+        "collaborator.applied": {
+            "collaboratorId": 101,
+            "programIds": [
+                102
+            ],
+            "distributorIds": [
+                103
+            ],
+            "groupIds": [
+                104
+            ]
+        },
+        "collaborator.declined": {
+            "collaboratorId": 101
+        },
+        "collaborator.joined": {
+            "collaboratorId": 101,
+            "programIds": [
+                102
+            ],
+            "distributorIds": [
+                103
+            ],
+            "groupIds": [
+                104
+            ]
+        },
+        "collaborator.updated": {
+            "collaboratorId": 101
+        },
+        "collaborator.deactivated": {
+            "collaboratorId": 101
+        },
+        "collaborator.deleted": {
+            "collaboratorId": 101
+        },
+        "collaborator_group.created": {
+            "groupId": 101
+        },
+        "collaborator_group.updated": {
+            "groupId": 101,
+            "changed": "name",
+            "previous": "sample-previous",
+            "current": "sample-current"
+        },
+        "collaborator_group.deleted": {
+            "groupId": 101
+        },
+        "collaborator_group.member_added": {
+            "groupId": 101,
+            "collaboratorId": 102
+        },
+        "collaborator_group.member_removed": {
+            "groupId": 101,
+            "collaboratorId": 102
+        },
+        "program.created": {
+            "programId": 101
+        },
+        "program.updated": {
+            "programId": 101
+        },
+        "program.status_changed": {
+            "programId": 101,
+            "status": "active"
+        },
+        "program.deleted": {
+            "programId": 101
+        },
+        "program_group.created": {
+            "programGroupId": 101
+        },
+        "program_group.updated": {
+            "programGroupId": 101
+        },
+        "program_group.deleted": {
+            "programGroupId": 101
+        },
+        "distributor.created": {
+            "distributorId": 101
+        },
+        "distributor.updated": {
+            "distributorId": 101
+        },
+        "distributor.deleted": {
+            "distributorId": 101
+        },
+        "conversion.created": {
+            "conversionIds": [
+                101
+            ],
+            "conversionCount": 102,
+            "transactionId": 103,
+            "programId": 104,
+            "opportunityId": 105,
+            "conversionType": "sale",
+            "incentiveType": "saleTransactionPercentage",
+            "incentiveResolverType": "newestBindingWins",
+            "incentiveTypeName": "sample-incentiveTypeName",
+            "incentiveResolverTypeName": "sample-incentiveResolverTypeName"
+        },
+        "conversion.approved": {
+            "conversionId": 101
+        },
+        "conversion.rejected": {
+            "conversionId": 101
+        },
+        "conversion.renewed": {
+            "conversionIds": [
+                101
+            ],
+            "conversionCount": 102,
+            "transactionId": 103,
+            "programId": 104,
+            "conversionType": "renewal",
+            "incentiveType": "sample-incentiveType",
+            "incentiveResolverType": "sample-incentiveResolverType",
+            "incentiveTypeName": "sample-incentiveTypeName",
+            "incentiveResolverTypeName": "sample-incentiveResolverTypeName"
+        },
+        "engagement.created": {
+            "engagementCount": 101,
+            "strategyId": "sample-strategyId",
+            "engagementIds": [
+                103
+            ]
+        },
+        "engagement.awarded": {
+            "engagementId": 101,
+            "transactionId": 102,
+            "incentiveType": "sample-incentiveType",
+            "incentiveResolverType": "sample-incentiveResolverType",
+            "incentiveTypeName": "sample-incentiveTypeName",
+            "incentiveResolverTypeName": "sample-incentiveResolverTypeName"
+        },
+        "engagement.completed": {
+            "engagementId": 101
+        },
+        "opportunity.created": {
+            "opportunityId": 101,
+            "trigger": "site_visit"
+        },
+        "opportunity.invalidated": {
+            "opportunityId": 101
+        },
+        "obligation.created": {
+            "obligationId": 101,
+            "conversionId": 102
+        },
+        "obligation.completed": {
+            "obligationId": 101
+        },
+        "obligation.approved": {
+            "obligationId": 101,
+            "collaboratorId": 102,
+            "value": 103,
+            "awardType": "USD",
+            "previousStatus": "draft"
+        },
+        "obligation.rejected": {
+            "obligationId": 101,
+            "collaboratorId": 102,
+            "value": 103,
+            "awardType": "sample-awardType",
+            "previousStatus": "draft"
+        },
+        "obligation.superseded": {
+            "obligationId": 101,
+            "supersededBy": 102,
+            "transactionId": 103,
+            "conversionId": 104,
+            "reason": "refund",
+            "changeReference": "sample-changeReference"
+        },
+        "transaction.created": {
+            "transactionId": 101
+        },
+        "transaction.completed": {
+            "transactionId": 101
+        },
+        "fulfillment.created": {
+            "fulfillmentId": 101,
+            "status": "sample-status"
+        },
+        "fulfillment.updated": {
+            "fulfillmentId": 101,
+            "status": "sample-status"
+        },
+        "payout.created": {
+            "payoutId": 101,
+            "collaboratorId": 102,
+            "value": 25.5,
+            "currency": "USD",
+            "status": "sample-status"
+        },
+        "payout.paid": {
+            "payoutId": 101,
+            "collaboratorId": 102,
+            "value": 25.5,
+            "currency": "USD"
+        },
+        "payout.failed": {
+            "payoutId": 101,
+            "collaboratorId": 102,
+            "value": 25.5,
+            "currency": "USD",
+            "failureReason": "sample-failureReason"
+        },
+        "payout.waiting": {
+            "payoutId": 101,
+            "collaboratorId": 102,
+            "value": 25.5,
+            "currency": "USD",
+            "waitingReason": "stripe_account_missing"
+        },
+        "distribution.completed": {
+            "distributionId": 101
+        },
+        "allocation.completed": {
+            "allocationId": 101
+        },
+        "metrics.updated": {
+            "collaboratorId": 101
+        },
+        "coupon.applied": {
+            "collaboratorId": 101
+        },
+        "refund.created": {
+            "transactionId": 101
+        },
+        "refund.recorded": {
+            "transactionId": 101,
+            "refundId": "siren-refund-",
+            "refundIdFromPlatform": true,
+            "source": "shopify",
+            "amount": 105,
+            "currency": "USD",
+            "whole": true,
+            "remainingValue": 108,
+            "refundedAt": "2026-11-24T17:00:00+00:00",
+            "lines": []
+        },
+        "product.merged": {
+            "productId": 101,
+            "mergedIds": [
+                102
+            ],
+            "linkedOwnerIds": [
+                103
+            ],
+            "unlinkedOwnerIds": [
+                104
+            ]
+        },
+        "coupon.linked": {
+            "code": "sample-code",
+            "source": "shopify",
+            "sourceLabel": "Shopify",
+            "collaboratorId": 104,
+            "propertyId": 105,
+            "couponId": 106
+        },
+        "coupon.unlinked": {
+            "code": "sample-code",
+            "source": "shopify",
+            "sourceLabel": "Shopify",
+            "collaboratorId": 104,
+            "propertyId": 105,
+            "couponId": 106
+        },
+        "coupon.merged": {
+            "couponId": 101,
+            "mergedIds": [
+                102
+            ],
+            "unlinkedHolderIds": [
+                103
+            ]
+        },
+        "store.connected": {
+            "propertyId": 101,
+            "source": "stripe",
+            "sourceLabel": "Stripe",
+            "mode": "live"
+        },
+        "store.disconnected": {
+            "propertyId": 101,
+            "source": "stripe",
+            "sourceLabel": "Stripe",
+            "mode": "live"
+        }
+    }
+}

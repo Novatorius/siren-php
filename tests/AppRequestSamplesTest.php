@@ -290,9 +290,9 @@ PHP;
      *
      * @return array{0: int, 1: string, 2: float}
      */
-    private static function send(string $file, string $kind): array
+    private static function send(string $file, string $kind, bool $test = false): array
     {
-        $request = self::signedContract($kind, self::secret(), self::$sirenUrl);
+        $request = self::signedContract($kind, self::secret(), self::$sirenUrl, $test);
         $started = microtime(true);
 
         $response = (new Client(['http_errors' => false, 'timeout' => 10]))->request($request->method, self::$app . '/' . $file . '.php', [
@@ -404,6 +404,18 @@ PHP;
             'payoutMethod' => [['payOnce', [$data['payout']['id'] ?? null, $data['collaborator'] ?? null, $data['amount'] ?? null]]],
         ];
         $this->assertSame($helpers[$kind] ?? [], self::lines(self::$stubLog));
+    }
+
+    public function testThePayoutSampleAnswersATestRequestWithoutPaying(): void
+    {
+        [$status, $body] = self::send('acme-ledger', 'payoutMethod', true);
+
+        $this->assertSame([200, '{}'], [$status, $body]);
+        $answer = self::awaitAnswer(10.0);
+        $this->assertNotNull($answer, 'The fake Siren got no answer.');
+        $this->assertSame(['outcome' => 'failed', 'reason' => 'A test request, so nothing was paid.'], $answer['body']);
+        $this->assertNull(\Siren\Sdk\AppAnswerCheck::problem('payoutMethod', self::contract('payoutMethod')['request']['data'], $answer['body']));
+        $this->assertSame([], self::lines(self::$stubLog), 'A test request reaches no payment provider.');
     }
 
     public function testTheByHandSampleChecksTheRequestAndAnswersIt(): void

@@ -6,7 +6,10 @@ namespace Siren\Sdk;
 
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\LogLevel;
 use Siren\Sdk\Exception\AppHandlerException;
+use Siren\Sdk\Exception\AppSlowTellException;
 use Siren\Sdk\Exception\ConflictException;
 use Siren\Sdk\Exception\ErrorCode;
 use Siren\Sdk\Exception\SignatureVerificationException;
@@ -43,7 +46,7 @@ use Siren\Sdk\Testing\SignedRequest;
  * | A body a parser already read, so no bytes to check | 500 `{"error"}`, and `onError` hears why |
  * | A failed check of {@see Apps::verifyRequest()}: the signature, the timestamp header or the time | 401 `{"error"}` with its words |
  * | A signed body that is not a JSON object, or an `app.request` that is not a request of version 1 | 400 `{"error"}` |
- * | A tell with a function | 200 `{}` once the function returns, or 500 when it throws |
+ * | A tell with a function | 200 `{}` once the function returns, or 500 when it throws. One that took over {@see TELL_TIME_LIMIT_SECONDS} seconds reaches `onError` as an {@see AppSlowTellException} |
  * | An ask whose `answerUrl` is on another Siren than this client's `baseUrl` | 500 `{"error"}` naming both, and `onError` hears it |
  * | An ask with a function | 200 `{}` at once. The function runs after the reply, and the answer it returns is posted |
  * | An `app.request` for a feature with no function | 404 `{"error": "No function handles <kind> <key>."}` |
@@ -135,7 +138,21 @@ final class AppRequestHandler
      */
     private const CLOUD_HOSTS = ['api.sirenaffiliates.com', 'app.sirenaffiliates.com'];
 
-    private const OPTIONS = ['toleranceSeconds', 'runLater', 'onError', 'extraKinds'];
+    /**
+     * How long Siren waits for a reply to a tell or a webhook event, in
+     * seconds. Past it Siren counts a timeout and sends it again, so a
+     * slower function runs twice. Siren's GuardedCurlHttpClient sends every
+     * delivery with an 8-second timeout (contract/devtools-listen.md, section 6).
+     */
+    public const TELL_TIME_LIMIT_SECONDS = 8;
+
+    /** How many refused signatures the default writes a minute before it counts the rest. */
+    public const REFUSALS_LOGGED_PER_MINUTE = 5;
+
+    /** What the default line adds after Siren refuses an answer with `app_answer_invalid`, or the SDK's own check does. */
+    private const BROKE_THE_RULE = "Your function's answer broke Siren's rule. Reproduce it with simulate() on this request's data, fix it, then resend with `siren apps resend %s`.";
+
+    private const OPTIONS = ['toleranceSeconds', 'runLater', 'onError', 'extraKinds', 'logger', 'clock'];
 
     private readonly int $tolerance;
 
@@ -144,6 +161,14 @@ final class AppRequestHandler
 
     /** @var (callable(\Throwable, AppRequest|WebhookEvent|null): void)|null The caller's, or null for the default line. */
     private $onError;
+
+    private readonly LoggerInterface $logger;
+
+    /** @var callable(): float */
+    private $clock;
+
+    /** @var array{start: float|null, written: int, held: int} The default's count of refused signatures this minute. */
+    private array $refusals = ['start' => null, 'written' => 0, 'held' => 0];
 
     /** @var array<string, true> The kinds {@see on()} takes: {@see FeatureKind::SENT} and `extraKinds`. */
     private array $kinds;
@@ -215,8 +240,22 @@ final class AppRequestHandler
             throw new AppHandlerException("apps->requestHandler() takes extraKinds as a list of kinds, such as ['payoutReview'].");
         }
 
+        $logger = $options['logger'] ?? new ErrorLogLogger();
+
+        if (!$logger instanceof LoggerInterface) {
+            throw new AppHandlerException("apps->requestHandler() takes logger as a PSR-3 Psr\\Log\\LoggerInterface, such as Monolog or your framework's logger.");
+        }
+
+        $clock = $options['clock'] ?? static fn (): float => microtime(true);
+
+        if (!is_callable($clock)) {
+            throw new AppHandlerException('apps->requestHandler() takes clock as a function that returns the time in seconds, such as fn () => microtime(true). It is for tests.');
+        }
+
         /** @var list<string> $extraKinds */
         $this->tolerance = $tolerance;
+        $this->logger = $logger;
+        $this->clock = $clock;
         $this->runLater = $runLater;
         $this->onError = $onError;
         $this->kinds = array_fill_keys(array_merge(FeatureKind::SENT, $extraKinds), true);
@@ -421,10 +460,29 @@ final class AppRequestHandler
     }
 
     /**
+     * {@see handle()}, then the debug line for the request: its name, the
+     * status and how long the reply took.
+     *
      * @param string|array<mixed>|null           $rawBody
      * @param array<string, string|list<string>> $headers
      */
     private function respond(string $method, string|array|null $rawBody, array $headers, bool $workHeld, ?\stdClass $trace = null): AppRequestReply
+    {
+        $started = $this->now();
+        $name = 'a request';
+        $reply = $this->handle($method, $rawBody, $headers, $workHeld, $trace, $name);
+
+        $this->logger->debug(sprintf('Siren request handler: %s replied %d in %d ms', $name, $reply->status, (int) round(($this->now() - $started) * 1000)));
+
+        return $reply;
+    }
+
+    /**
+     * @param string|array<mixed>|null           $rawBody
+     * @param array<string, string|list<string>> $headers
+     * @param string                             $name    Set to the request's name, for the debug line, once the request is read.
+     */
+    private function handle(string $method, string|array|null $rawBody, array $headers, bool $workHeld, ?\stdClass $trace, string &$name): AppRequestReply
     {
         if (strtoupper($method) !== 'POST') {
             return self::reply(405, 'Siren sends its requests with POST, and this address takes nothing else.', ['Allow' => 'POST']);
@@ -441,8 +499,10 @@ final class AppRequestHandler
         }
 
         try {
-            $t = Apps::signedTime($rawBody, $headers, $this->secret, $this->tolerance, microtime(true));
+            $t = Apps::signedTime($rawBody, $headers, $this->secret, $this->tolerance, $this->now());
         } catch (SignatureVerificationException $e) {
+            $this->refuse($e, $trace);
+
             return self::reply(401, $e->getMessage());
         }
 
@@ -456,10 +516,14 @@ final class AppRequestHandler
 
         if ($event === null || $event === Apps::REQUEST_EVENT) {
             try {
-                return $this->route(Apps::requestFrom($body, $t, $headers), $workHeld, $trace);
+                $request = Apps::requestFrom($body, $t, $headers);
             } catch (SignatureVerificationException $e) {
                 return self::reply(400, $e->getMessage());
             }
+
+            $name = sprintf('%s %s %s', $request->feature['kind'], $request->feature['key'], $request->id);
+
+            return $this->route($request, $workHeld, $trace);
         }
 
         // `{}` and `[]` both decode to an empty array, so the first byte tells them apart.
@@ -467,21 +531,26 @@ final class AppRequestHandler
             return self::reply(400, 'The signed body is not a JSON object.');
         }
 
+        $delivery = Apps::header($headers, Webhooks::DELIVERY_HEADER);
+        $name = $event . ($delivery === null ? '' : ' ' . $delivery);
         $fn = $this->byEvent[$event] ?? null;
 
         if ($fn === null) {
             return self::reply(200);
         }
 
-        $webhook = Webhooks::eventFrom($body, $event, Apps::header($headers, Webhooks::DELIVERY_HEADER));
+        $webhook = Webhooks::eventFrom($body, $event, $delivery);
+        $started = $this->now();
 
         try {
             $fn($webhook);
         } catch (\Throwable $e) {
-            $this->report($e, $webhook, $trace);
+            $this->report($e, $webhook, $trace, null, true);
 
             return self::reply(500, sprintf('The function for %s failed, so Siren will send the event again.', $event));
         }
+
+        $this->checkTime($started, $event, 'event', $webhook, $trace);
 
         return self::reply(200);
     }
@@ -570,13 +639,17 @@ final class AppRequestHandler
         }
 
         if (!$request->isAsk()) {
+            $started = $this->now();
+
             try {
                 $fn($request);
             } catch (\Throwable $e) {
-                $this->report($e, $request, $trace, 'Siren sends it again in about a minute.');
+                $this->report($e, $request, $trace, 'Siren sends it again in about a minute.', true);
 
                 return self::reply(500, sprintf('The function for %s %s failed, so Siren will send the request again.', $kind, $key));
             }
+
+            $this->checkTime($started, $kind . ' ' . $key, 'tell', $request, $trace);
 
             return self::reply(200);
         }
@@ -634,7 +707,7 @@ final class AppRequestHandler
         try {
             $answer = $fn($request);
         } catch (\Throwable $e) {
-            $this->report($e, $request, $trace, $next);
+            $this->report($e, $request, $trace, $next, true);
 
             return;
         }
@@ -690,7 +763,10 @@ final class AppRequestHandler
             $sendsAgain = !in_array($e->getErrorCode(), ['app_request_already_answered', 'app_request_dropped'], true);
             $this->report($e, $request, $trace, $sendsAgain ? $next : null);
         } catch (\Throwable $e) {
-            $this->report($e, $request, $trace, $next);
+            // An answer that breaks a rule fails the same way when Siren sends it again, so the line says to fix it.
+            $broke = ($e instanceof SirenException && $e->getErrorCode() === ErrorCode::APP_ANSWER_INVALID)
+                || ($e instanceof AppHandlerException && $e->getPrevious() instanceof \InvalidArgumentException);
+            $this->report($e, $request, $trace, $broke ? sprintf(self::BROKE_THE_RULE, $request->id) : $next);
         }
     }
 
@@ -822,10 +898,93 @@ final class AppRequestHandler
         return [$scheme, strtolower($parts['host']), $parts['port'] ?? ($scheme === 'https' ? 443 : 80)];
     }
 
+    private function now(): float
+    {
+        return (float) ($this->clock)();
+    }
+
     /**
-     * @param string|null $next What happens next, which the default line adds.
+     * Reports a tell or an event whose function ran past
+     * {@see TELL_TIME_LIMIT_SECONDS}: its reply came after Siren stopped
+     * waiting, so Siren sends it again and the function runs twice.
      */
-    private function report(\Throwable $error, AppRequest|WebhookEvent|null $about, ?\stdClass $trace = null, ?string $next = null): void
+    private function checkTime(float $started, string $name, string $what, AppRequest|WebhookEvent $about, ?\stdClass $trace): void
+    {
+        $took = $this->now() - $started;
+
+        if ($took <= self::TELL_TIME_LIMIT_SECONDS) {
+            return;
+        }
+
+        $this->report(new AppSlowTellException(sprintf(
+            '%s took %.1f s. Siren stops waiting at %d s and sends the %s again, so it ran twice. Save what you need, hand the slow part to runLater or your own queue, and return.',
+            $name,
+            $took,
+            self::TELL_TIME_LIMIT_SECONDS,
+            $what,
+        )), $about, $trace);
+    }
+
+    /**
+     * Reports a request whose signature the handler refused. `onError`
+     * hears every one. The default writes a warning that says what to
+     * check, at most {@see REFUSALS_LOGGED_PER_MINUTE} a minute, and counts
+     * the rest in one line when the next refusal after that minute comes.
+     * It keeps no timer, so the count of a minute's last refusals waits for
+     * the next one.
+     */
+    private function refuse(SignatureVerificationException $error, ?\stdClass $trace): void
+    {
+        if ($trace !== null || $this->onError !== null) {
+            $this->report($error, null, $trace);
+
+            return;
+        }
+
+        $now = $this->now();
+
+        if ($this->refusals['start'] === null || $now - $this->refusals['start'] >= 60) {
+            if ($this->refusals['held'] > 0) {
+                $this->logger->warning(sprintf(
+                    'Siren request handler: %d more request%s failed the signature check in the last minute. When every request fails, SIREN_SIGNING_SECRET is wrong or was rotated.',
+                    $this->refusals['held'],
+                    $this->refusals['held'] === 1 ? '' : 's',
+                ));
+            }
+
+            $this->refusals = ['start' => $now, 'written' => 0, 'held' => 0];
+        }
+
+        if ($this->refusals['written'] >= self::REFUSALS_LOGGED_PER_MINUTE) {
+            $this->refusals['held']++;
+
+            return;
+        }
+
+        $this->refusals['written']++;
+        $this->logger->warning('Siren request handler: ' . $this->refusalAdvice($error), ['exception' => $error]);
+    }
+
+    /** What a refused signature means, and what to check. */
+    private function refusalAdvice(SignatureVerificationException $error): string
+    {
+        $proxy = " Check that a proxy passes Siren's X-Siren-* headers through";
+
+        return match ($error->getErrorCode()) {
+            SignatureVerificationException::MISMATCH => "the request signature does not match. Check SIREN_SIGNING_SECRET: it must be this app's signing secret, and it changes when the secret is rotated. Pass the raw body exactly as received.",
+            SignatureVerificationException::STALE => sprintf("the request's signed time is more than %d seconds from this machine's clock. Check the clock.", $this->tolerance),
+            SignatureVerificationException::HEADER_MISSING => 'the request has no X-Siren-Signature-V2 header.' . $proxy . '.',
+            SignatureVerificationException::TIMESTAMP_MISMATCH => 'the X-Siren-Timestamp header differs from the time X-Siren-Signature-V2 signed.' . $proxy . ' unchanged.',
+            SignatureVerificationException::HEADER_MALFORMED => 'the X-Siren-Signature-V2 header cannot be read.' . $proxy . ' unchanged.',
+            default => lcfirst($error->getMessage()),
+        };
+    }
+
+    /**
+     * @param string|null $next     What happens next, which the default line adds.
+     * @param bool        $yourCode Whether the developer's own function threw it, so the line says where.
+     */
+    private function report(\Throwable $error, AppRequest|WebhookEvent|null $about, ?\stdClass $trace = null, ?string $next = null, bool $yourCode = false): void
     {
         if ($trace !== null) {
             $trace->error ??= $error;
@@ -834,7 +993,7 @@ final class AppRequestHandler
         }
 
         if ($this->onError === null) {
-            self::logError($error, $about, $next);
+            $this->logError($error, $about, $next, $yourCode);
 
             return;
         }
@@ -842,24 +1001,51 @@ final class AppRequestHandler
         try {
             ($this->onError)($error, $about);
         } catch (\Throwable $failure) {
-            self::logError($failure, $about);
+            $this->logError($failure, $about, null, true);
         }
     }
 
-    private static function logError(\Throwable $error, AppRequest|WebhookEvent|null $about, ?string $next = null): void
+    /**
+     * The default `onError`: one line through the logger, a warning for a
+     * slow tell and an error for the rest. It holds the request's name, the
+     * error's class, code and message, a cause folded in as `(cause: ...)`,
+     * what happens next, and where it was thrown when the developer's own
+     * function threw it. The error itself goes in the context as
+     * `exception`, as PSR-3 asks, so a logger such as Monolog can add the
+     * stack.
+     */
+    private function logError(\Throwable $error, AppRequest|WebhookEvent|null $about, ?string $next = null, bool $yourCode = false): void
     {
         $what = match (true) {
             $about instanceof AppRequest => sprintf(' for %s %s, request %s', $about->feature['kind'], $about->feature['key'], $about->id),
             $about instanceof WebhookEvent => ' for ' . $about->getType(),
             default => '',
         };
+        $class = (new \ReflectionClass($error))->getShortName();
+        $code = $error instanceof SirenException ? $error->getErrorCode() : null;
         $message = rtrim($error->getMessage());
+        $cause = $error->getPrevious();
 
-        if ($next !== null) {
-            $message .= (preg_match('/[.!?]$/', $message) === 1 ? ' ' : '. ') . $next;
+        if ($cause !== null && rtrim($cause->getMessage()) !== '' && rtrim($cause->getMessage()) !== $message) {
+            $message .= sprintf(' (cause: %s)', rtrim($cause->getMessage()));
         }
 
-        error_log(sprintf('Siren request handler%s: %s: %s', $what, get_class($error), $message));
+        if ($next !== null) {
+            $message .= (preg_match('/[.!?)]$/', $message) === 1 ? ' ' : '. ') . $next;
+        }
+
+        if ($yourCode) {
+            $message .= sprintf(' (thrown at %s:%d)', $error->getFile(), $error->getLine());
+        }
+
+        $line = sprintf('Siren request handler%s: %s%s: %s', $what, $class, $code === null || $code === '' ? '' : ' ' . $code, $message);
+        $context = ['exception' => $error] + ($about === null ? [] : ['request' => $about]);
+
+        if ($error instanceof AppSlowTellException) {
+            $this->logger->warning($line, $context);
+        } else {
+            $this->logger->error($line, $context);
+        }
     }
 
     /**

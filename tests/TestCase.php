@@ -67,7 +67,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
      * by the SDK's testing helper with the request's own id, app, key and
      * data, and its answerUrl on `$baseUrl`.
      */
-    protected static function signedContract(string $kind, string $secret, string $baseUrl = self::FIXTURE_SIREN): \Siren\Sdk\Testing\SignedRequest
+    protected static function signedContract(string $kind, string $secret, string $baseUrl = self::FIXTURE_SIREN, bool $test = false): \Siren\Sdk\Testing\SignedRequest
     {
         $contracts = json_decode((string) file_get_contents(__DIR__ . '/Fixtures/apps-feature-contracts/requests.json'), true, 512, JSON_THROW_ON_ERROR);
         $request = $contracts['kinds'][$kind]['request'];
@@ -78,7 +78,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
             'app' => $request['app'],
             'data' => $request['data'],
             'baseUrl' => $baseUrl,
-        ]);
+        ] + ($test ? ['test' => true] : []));
     }
 
     protected RecordingHttpClient $http;

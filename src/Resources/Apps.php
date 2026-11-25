@@ -140,11 +140,17 @@ final class Apps
      *
      * @param string|null $signingSecret The app's signing secret, which Siren showed when it made the app.
      *     Defaults to the `SIREN_SIGNING_SECRET` environment variable.
-     * @param array{toleranceSeconds?: int, runLater?: callable(callable(): void): void, onError?: callable(\Throwable, AppRequest|WebhookEvent|null): void} $options
+     * @param array{toleranceSeconds?: int, runLater?: callable(callable(): void): void, onError?: callable(\Throwable, AppRequest|WebhookEvent|null): void, extraKinds?: list<string>, logger?: \Psr\Log\LoggerInterface, clock?: callable(): float} $options
      *     `toleranceSeconds`: as {@see verifyRequest()}, 1 to 3600, default 300.
      *     `runLater`: takes an ask's work after the reply, such as
      *     `fn ($work) => app()->terminating($work)` in Laravel.
-     *     `onError`: hears every failure the reply can't carry. Defaults to `error_log()`.
+     *     `onError`: hears every failure the reply can't carry, a refused signature and a slow tell
+     *     included. Defaults to one line through `logger`.
+     *     `extraKinds`: kinds a newer Siren sends that `on()` should take.
+     *     `logger`: a PSR-3 logger, which gets a debug line for each request handled, a warning for a
+     *     refused signature or a slow tell, and an error for the rest. Defaults to `error_log()` lines
+     *     at warning and above.
+     *     `clock`: a function that returns the time in seconds, for tests. Defaults to `microtime(true)`.
      *
      * @throws \InvalidArgumentException For an empty secret or an option it can't use.
      */
@@ -260,7 +266,7 @@ final class Apps
         $v2 = self::header($headers, 'X-Siren-Signature-V2');
 
         if ($v2 === null) {
-            throw new SignatureVerificationException('The request has no X-Siren-Signature-V2 header.');
+            throw new SignatureVerificationException('The request has no X-Siren-Signature-V2 header.', 0, SignatureVerificationException::HEADER_MISSING);
         }
 
         [$t, $signatures] = self::readSignatureHeader($v2);
@@ -268,7 +274,7 @@ final class Apps
         $stamp = self::header($headers, 'X-Siren-Timestamp');
 
         if ($stamp !== null && $stamp !== (string) $t) {
-            throw new SignatureVerificationException('The X-Siren-Timestamp header differs from the time X-Siren-Signature-V2 signed.');
+            throw new SignatureVerificationException('The X-Siren-Timestamp header differs from the time X-Siren-Signature-V2 signed.', 0, SignatureVerificationException::TIMESTAMP_MISMATCH);
         }
 
         $expected = hash_hmac('sha256', $t . '.' . $rawBody, $secret);
@@ -282,6 +288,8 @@ final class Apps
         if (!$matched) {
             throw new SignatureVerificationException(
                 'The request signature does not match. Pass the raw body exactly as received and the signing secret of this app.',
+                0,
+                SignatureVerificationException::MISMATCH,
             );
         }
 
@@ -289,7 +297,7 @@ final class Apps
             throw new SignatureVerificationException(sprintf(
                 "The request's signed timestamp is more than %d seconds from this machine's clock, so it may be a replay. Check the clock if every request fails.",
                 $tolerance,
-            ));
+            ), 0, SignatureVerificationException::STALE);
         }
 
         return $t;
@@ -327,6 +335,7 @@ final class Apps
             timestamp: $t,
             deliveryId: self::header($headers, 'X-Siren-Delivery'),
             body: $body,
+            test: ($body['test'] ?? false) === true,
         );
     }
 
@@ -365,6 +374,8 @@ final class Apps
         if (count($times) !== 1 || preg_match('/^\d{1,15}$/', $times[0]) !== 1 || $v1Count === 0) {
             throw new SignatureVerificationException(
                 'The X-Siren-Signature-V2 header cannot be read. Siren sends t=<seconds>,v1=<hex signature>.',
+                0,
+                SignatureVerificationException::HEADER_MALFORMED,
             );
         }
 
@@ -392,6 +403,7 @@ final class Apps
                 => 'its `id` must be `apr_` followed by 32 hex characters, such as apr_9c60190a4501399d0ae55f041c237b39',
             ($body['type'] ?? null) !== self::REQUEST_EVENT => 'its `type` must be `app.request`',
             $mode !== 'tell' && $mode !== 'ask' => 'its `mode` must be `tell` or `ask`',
+            array_key_exists('test', $body) && !is_bool($body['test']) => 'its `test` must be true or false, and Siren sends it only on a test request',
             !is_string($body['app'] ?? null) || $body['app'] === '' => "its `app` must be the app's key, as text",
             !$isObject($feature) => 'its `feature` must be an object with the feature\'s kind, key and id',
             !is_string($feature['kind'] ?? null) => 'its `feature.kind` must be text, such as distributionResolver',

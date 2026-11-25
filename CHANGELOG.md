@@ -253,6 +253,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GET /fulfillments/{id}`, `PUT /webhooks/{id}` and
   `GET /webhooks/{id}/deliveries`, with the `WebhookSubscriptionUpdate` and
   `WebhookDelivery` schemas.
+- `apps->requestHandler()` takes `logger`, a PSR-3 logger, and the package
+  now requires `psr/log`. The handler writes a `debug` line for each request
+  it handled, with its kind, key and id (or event type and delivery id), the
+  status and the milliseconds. It writes a `warning` for a refused signature
+  and a slow tell, and an `error` for the rest of what `onError` gets. Without
+  `logger`, `ErrorLogLogger` writes warnings and errors to `error_log()`. It
+  also takes `clock`, for tests.
+- A refused signature reaches `onError` as a `SignatureVerificationException`
+  whose code says why: `signature_mismatch`, `signature_stale`,
+  `signature_header_missing`, `signature_timestamp_mismatch` or
+  `signature_header_malformed`. The reply stays a 401. The default warning
+  says what to check, such as SIREN_SIGNING_SECRET, the clock, or a proxy
+  that drops Siren's headers. It writes five a minute and counts the rest in
+  one line, with no timer.
+- A tell or an event whose function takes over 8 seconds
+  (`AppRequestHandler::TELL_TIME_LIMIT_SECONDS`, Siren's delivery timeout)
+  reaches `onError` as an `AppSlowTellException`, since Siren stopped waiting
+  and sends it again. The reply is still 200, and `simulate()` returns the
+  error.
+- `AppRequests::event($type, $data)` signs a webhook event with Siren's own
+  headers, for testing an `onEvent()` function, and
+  `AppRequests::sampleEventData($type)` gives a payload for each of the 60
+  events Siren's `docs/api/webhooks-events.md` describes. The package ships
+  them as `resources/webhook-event-samples.json`, which
+  `bin/event-samples.php` writes from that page. A test compares the two when
+  `SIREN_WEBHOOK_EVENTS` names Siren's copy.
+- `AppRequests::fromRecord($record, $key)` signs a stored request again, from
+  the row `GET /apps/requests/{id}` gives, with its own id, kind, mode,
+  question, `answerBy` and `test`.
+- `AppRequest::$test` is true for a test request, as `siren trigger ask`
+  sends one, and false when the body has no `test` field.
+  `AppRequests::make()` takes `'test' => true`. The README says a handler
+  must never move money or write records on a test request, and the payout
+  method sample answers one `failed` before any payment.
+- The README gains "Develop on your machine": a sandbox key,
+  `siren apps apply` with no address, `siren listen --forward-to` and
+  `siren trigger ask`, with no tunnel, and how to run any `siren` command
+  through `npx @novatorius/siren`.
 
 ### Changed
 
@@ -273,6 +311,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   README says once, under Configuration, that `baseUrl` is only for a local
   or sandbox Siren. The webhook section says an app's address gets the V2
   signature, which the request handler checks.
+- The default `onError` line is shorter. It names the error's class without
+  its namespace, adds its code, and folds a cause in as `(cause: ...)`. It
+  says where the error was thrown only when your own function threw it.
+- After Siren refuses an answer with 422 `app_answer_invalid`, or the SDK's
+  own check refuses it, the line no longer says Siren sends it again. It says
+  to reproduce the answer with `simulate()`, fix it, then resend.
+- The envelope check refuses a `test` that is not true or false with a 400
+  that names the field.
 - The 400 for a signed body that is not an app request of version 1, and
   `verifyRequest()`'s `SignatureVerificationException` for it, name the first
   field that fails and its rule, such as "its `id` must be `apr_` followed by

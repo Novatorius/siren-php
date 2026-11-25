@@ -293,22 +293,28 @@ final class AppRequestDxPass2Test extends TestCase
         $this->assertStringContainsString(self::nextSend($request), $logged);
     }
 
-    public function testTheDefaultLineForAnAnswerTheCheckRefusesSaysWhenSirenSendsItAgain(): void
+    // Pass 4: an answer that breaks a rule fails the same way when Siren sends it again, so these lines say to fix it.
+
+    public function testTheDefaultLineForAnAnswerTheCheckRefusesSaysToFixIt(): void
     {
         $handler = $this->mockSiren([])->apps->requestHandler(self::SECRET)
             ->on('distributionResolver', static fn () => ['units' => 'USD']);
         $request = self::request('distributionResolver', 'split-by-score');
+        $logged = $this->logged($handler, $request);
 
-        $this->assertStringContainsString(self::nextSend($request), $this->logged($handler, $request));
+        $this->assertStringContainsString("Your function's answer broke Siren's rule.", $logged);
+        $this->assertStringNotContainsString(self::nextSend($request), $logged);
     }
 
-    public function testTheDefaultLineForAPostSirenRefusesSaysWhenSirenSendsItAgain(): void
+    public function testTheDefaultLineForAPostSirenRefusesSaysToFixIt(): void
     {
         $handler = $this->mockSiren([self::errorResponse(422, 'outcome must be allocated', 'app_answer_invalid')])->apps->requestHandler(self::SECRET)
             ->on('distributionResolver', static fn () => ['outcome' => 'allocated', 'units' => 'USD', 'shares' => ['41' => 1, '43' => 1]]);
         $request = self::request('distributionResolver', 'split-by-score');
+        $logged = $this->logged($handler, $request);
 
-        $this->assertStringContainsString(self::nextSend($request), $this->logged($handler, $request));
+        $this->assertStringContainsString("Your function's answer broke Siren's rule.", $logged);
+        $this->assertStringNotContainsString(self::nextSend($request), $logged);
     }
 
     public function testTheDefaultLineForARequestSirenStoppedWaitingForSaysNothingAboutASend(): void

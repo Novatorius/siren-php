@@ -120,6 +120,13 @@ namespace {
         }
     }
 
+    if (!function_exists('logger')) {
+        function logger(): \Psr\Log\LoggerInterface
+        {
+            return new \Psr\Log\NullLogger();
+        }
+    }
+
     if (!function_exists('report')) {
         function report(\Throwable $error): void
         {
