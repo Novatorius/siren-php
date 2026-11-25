@@ -42,15 +42,15 @@ final class AppRequestIdPrefixTest extends TestCase
     /** @return array<string, array{array<string, mixed>, string}> */
     public static function badPrefixes(): array
     {
-        $refusal = 'apps->requests->list() takes an idPrefix of apr_ and 4 to 32 hex characters, the start of a request id.';
-        $alone = 'apps->requests->list() finds by idPrefix alone. Siren ignores status, limit and before beside it, so leave them out.';
+        $refusal = 'apps->requests->list() takes an idPrefix of apr_ and 4 to 32 hex characters, and got ';
+        $alone = 'apps->requests->list() takes idPrefix alone. Siren ignores status, limit, before and appId beside it, and answers at most two matches.';
 
         return [
-            'too short' => [['idPrefix' => 'apr_9f2'], $refusal],
-            'too long' => [['idPrefix' => 'apr_' . str_repeat('a', 33)], $refusal],
-            'not hex' => [['idPrefix' => 'apr_9f2g'], $refusal],
-            'no apr_' => [['idPrefix' => '9f2c4e1a'], $refusal],
-            'not text' => [['idPrefix' => 9], $refusal],
+            'too short' => [['idPrefix' => 'apr_9f2'], $refusal . '"apr_9f2".'],
+            'too long' => [['idPrefix' => 'apr_' . str_repeat('a', 33)], $refusal . '"apr_' . str_repeat('a', 33) . '".'],
+            'not hex' => [['idPrefix' => 'apr_9f2g'], $refusal . '"apr_9f2g".'],
+            'no apr_' => [['idPrefix' => '9f2c4e1a'], $refusal . '"9f2c4e1a".'],
+            'not text' => [['idPrefix' => 9], $refusal . '9.'],
             'with limit' => [['idPrefix' => 'apr_9f2c', 'limit' => 5], $alone],
             'with before' => [['idPrefix' => 'apr_9f2c', 'before' => 'apr_' . str_repeat('c', 32)], $alone],
             'with status' => [['idPrefix' => 'apr_9f2c', 'status' => 'applied'], $alone],

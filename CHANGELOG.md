@@ -9,15 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apps->requests->list(['appId' => 12])` keeps to one app's requests, on
+  the plain list, a page of it and `needs_attention`. An `appId` that is not
+  a whole number of 1 or more, or one beside `idPrefix`, is refused before
+  sending. The list's refusals now use Node's wording.
 - `apps->requests->list(['idPrefix' => 'apr_9f2c'])` finds requests by the
   start of their id, `apr_` and 4 to 32 hex characters, as Siren's
   `GET /apps/requests` now reads it. Siren answers at most two matches. A
   bad prefix, or any other param beside it, is refused before sending.
 - `apps->requests->list()` pages with `limit` (1 to 100, 50 when absent) and
   `before`, a request id whose older requests the page holds, as Siren's
-  `GET /apps/requests` now reads them. A bad `limit` or `before`, or either
-  with `needs_attention`, which Siren answers whole, is refused before
-  sending.
+  `GET /apps/requests` now reads them, `needs_attention` included on a Siren
+  that pages it. An older Siren ignores both there and answers at most 50. A
+  bad `limit` or `before` is refused before sending.
 - `Testing\AppRequests::make()` and `fromRecord()` build `answerUrl` on a
   non-empty `SIREN_BASE_URL`, then Siren Cloud, as `new Siren()` does, so a
   shell with `.env.sandbox` loaded tests against the sandbox.

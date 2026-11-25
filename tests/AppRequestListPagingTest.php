@@ -22,7 +22,8 @@ final class AppRequestListPagingTest extends TestCase
 
     public function testTheListTakesLimitAndBefore(): void
     {
-        $this->assertSame(['status', 'limit', 'before', 'idPrefix'], AppRequests::LIST_FILTERS);
+        $this->assertContains('limit', AppRequests::LIST_FILTERS);
+        $this->assertContains('before', AppRequests::LIST_FILTERS);
         $this->assertSame(100, AppRequests::MAX_LIST_LIMIT);
     }
 
@@ -34,7 +35,7 @@ final class AppRequestListPagingTest extends TestCase
         $siren->apps->requests->list(['status' => 'applied', 'limit' => 20, 'before' => $before]);
 
         parse_str($this->history[0]['request']->getUri()->getQuery(), $query);
-        $this->assertSame(['status' => 'applied', 'limit' => '20', 'before' => $before], $query);
+        $this->assertEqualsCanonicalizing(['status' => 'applied', 'limit' => '20', 'before' => $before], $query);
     }
 
     public function testAListWithNoParamsSendsNoQuery(): void

@@ -49,7 +49,7 @@ use Siren\Sdk\HttpTransport;
 final class AppRequests
 {
     /** The params {@see list()} sends, the ones `GET /apps/requests` reads (ListAppRequests.php in Siren). */
-    public const LIST_FILTERS = ['status', 'limit', 'before', 'idPrefix'];
+    public const LIST_FILTERS = ['status', 'limit', 'before', 'idPrefix', 'appId'];
 
     /** The start of a request id `idPrefix` takes: `apr_` and 4 to 32 hex characters, in either case. */
     public const ID_PREFIX_PATTERN = '/^apr_[0-9a-fA-F]{4,32}$/';
@@ -124,21 +124,23 @@ final class AppRequests
      * - `before` is a request id. The page then holds only requests older
      *   than it, so the last id of one page reads the next. Siren lists none
      *   for an id the organization has no request for.
-     *
+     * - `appId` keeps to one app's requests, by the app's numeric id, on the
+     *   plain list, a page of it and `needs_attention`.
      * - `idPrefix` finds requests by the start of their id, `apr_` and 4 to
      *   32 hex characters, as the CLI prints an id short. Siren answers at
      *   most 2 of the organization's matches, newest first, so 2 rows mean
      *   the prefix fits more than one request and a longer one is needed.
      *   Siren ignores the other params beside it, so they are refused.
      *
-     * Siren answers `needs_attention` whole, so `limit` or `before` with it
-     * is refused, as in Node.
+     * `needs_attention` pages with `limit` and `before` on a Siren from
+     * pkt/apps-attention-paging. An older Siren ignores both there and
+     * answers at most 50. The rules and their wording match Node's.
      *
-     * @param array{status?: string, limit?: int, before?: string, idPrefix?: string} $params
+     * @param array{status?: string, limit?: int, before?: string, idPrefix?: string, appId?: int} $params
      *
      * @return list<AppRequestRecord>
      *
-     * @throws \InvalidArgumentException For a param other than {@see LIST_FILTERS}, a status outside {@see STATUSES}, a `limit` that is not a whole number from 1 to 100, a `before` that is not a request id, either with `needs_attention`, an `idPrefix` that is not the start of a request id, or any other param with `idPrefix`.
+     * @throws \InvalidArgumentException For a param other than {@see LIST_FILTERS}, a status outside {@see STATUSES}, an `appId` that is not a whole number of 1 or more, an `idPrefix` that is not the start of a request id or has another param beside it, a `limit` that is not a whole number from 1 to 100, or a `before` that is not a request id.
      * @throws ApiException When Siren answers 2xx with no list of requests.
      * @throws SirenException When Siren refuses it.
      */
@@ -154,63 +156,79 @@ final class AppRequests
             }
         }
 
-        if (array_key_exists('idPrefix', $params)) {
-            return $this->findByIdPrefix($params);
-        }
-
         $status = $params['status'] ?? null;
 
         if ($status !== null && !in_array($status, self::STATUSES, true)) {
             throw new \InvalidArgumentException(sprintf('apps->requests->list() takes a status of %s.', implode(', ', self::STATUSES)));
         }
 
-        if ($status === 'needs_attention' && (array_key_exists('limit', $params) || array_key_exists('before', $params))) {
-            throw new \InvalidArgumentException('apps->requests->list() pages the plain list only. Siren answers needs_attention whole, so leave out limit and before.');
+        if (array_key_exists('appId', $params) && !self::wholeNumber($params['appId'], 1, null)) {
+            throw new \InvalidArgumentException(sprintf("apps->requests->list() takes an appId of a whole number of 1 or more, an app's id, and got %s.", self::shown($params['appId'])));
         }
 
-        $query = $status === null ? [] : ['status' => $status];
+        if (array_key_exists('idPrefix', $params)) {
+            $prefix = $params['idPrefix'];
 
-        if (array_key_exists('limit', $params)) {
-            $limit = $params['limit'];
-
-            if (!is_int($limit) || $limit < 1 || $limit > self::MAX_LIST_LIMIT) {
-                throw new \InvalidArgumentException(sprintf('apps->requests->list() takes a limit that is a whole number from 1 to %d.', self::MAX_LIST_LIMIT));
+            if (!self::matches($prefix, self::ID_PREFIX_PATTERN)) {
+                throw new \InvalidArgumentException(sprintf('apps->requests->list() takes an idPrefix of apr_ and 4 to 32 hex characters, and got %s.', self::shown($prefix)));
             }
 
-            $query['limit'] = $limit;
+            if (count($params) > 1) {
+                // ListAppRequests answers idPrefix alone, with no paging, and ignores every other filter.
+                throw new \InvalidArgumentException('apps->requests->list() takes idPrefix alone. Siren ignores status, limit, before and appId beside it, and answers at most two matches.');
+            }
+
+            return $this->rows(['idPrefix' => $prefix]);
         }
 
-        if (array_key_exists('before', $params)) {
-            $before = $params['before'];
+        if (array_key_exists('limit', $params) && !self::wholeNumber($params['limit'], 1, self::MAX_LIST_LIMIT)) {
+            throw new \InvalidArgumentException(sprintf('apps->requests->list() takes a limit of a whole number from 1 to %d, and got %s.', self::MAX_LIST_LIMIT, self::shown($params['limit'])));
+        }
 
-            if (!is_string($before) || preg_match(self::REQUEST_ID_PATTERN, $before) !== 1) {
-                throw new \InvalidArgumentException('apps->requests->list() takes a before that is a request id, such as the last id of the page before.');
-            }
+        if (array_key_exists('before', $params) && !self::matches($params['before'], self::REQUEST_ID_PATTERN)) {
+            throw new \InvalidArgumentException(sprintf('apps->requests->list() before needs a request id of apr_ and 32 lowercase hex characters, and got %s.', self::shown($params['before'])));
+        }
 
-            $query['before'] = $before;
+        $query = [];
+
+        if (isset($params['appId'])) {
+            $query['appId'] = $params['appId'];
+        }
+
+        if (isset($params['limit'])) {
+            $query['limit'] = $params['limit'];
+        }
+
+        if (isset($params['before'])) {
+            $query['before'] = $params['before'];
+        }
+
+        if ($status !== null) {
+            $query['status'] = $status;
         }
 
         return $this->rows($query);
     }
 
     /**
-     * @param array<string, mixed> $params
-     *
-     * @return list<AppRequestRecord>
+     * Whether a caller's value is a whole number in range. The value is
+     * checked as given, since PHP doesn't hold a caller to the array shape.
      */
-    private function findByIdPrefix(array $params): array
+    private static function wholeNumber(mixed $value, int $min, ?int $max): bool
     {
-        $prefix = $params['idPrefix'];
+        return is_int($value) && $value >= $min && ($max === null || $value <= $max);
+    }
 
-        if (!is_string($prefix) || preg_match(self::ID_PREFIX_PATTERN, $prefix) !== 1) {
-            throw new \InvalidArgumentException('apps->requests->list() takes an idPrefix of apr_ and 4 to 32 hex characters, the start of a request id.');
-        }
+    /** Whether a caller's value is text that matches the pattern, checked as given. */
+    private static function matches(mixed $value, string $pattern): bool
+    {
+        return is_string($value) && preg_match($pattern, $value) === 1;
+    }
 
-        if (count($params) > 1) {
-            throw new \InvalidArgumentException('apps->requests->list() finds by idPrefix alone. Siren ignores status, limit and before beside it, so leave them out.');
-        }
-
-        return $this->rows(['idPrefix' => $prefix]);
+    /** A value as Node's JSON.stringify shows it in a refusal: text quoted, a number or true as it is. */
+    private static function shown(mixed $value): string
+    {
+        return (string) json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
     }
 
     /**

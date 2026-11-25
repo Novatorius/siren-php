@@ -9,8 +9,8 @@ use Siren\Sdk\Testing\AppRequests;
 
 /**
  * Pass 5: the testing helpers read `SIREN_BASE_URL` as the client does, a
- * key passed to `fromRecord()` wins over the saved one as in Node, and the
- * request list refuses paging on `needs_attention`, which Siren answers whole.
+ * key passed to `fromRecord()` wins over the saved one as in Node, and
+ * `needs_attention` alone is still sent as before.
  */
 final class AppRequestPass5Test extends TestCase
 {
@@ -83,31 +83,6 @@ final class AppRequestPass5Test extends TestCase
         $body = self::body(AppRequests::fromRecord(self::record(), null, ['secret' => 'test-secret'])->rawBody);
 
         $this->assertSame('acme-ledger', $body['feature']['key']);
-    }
-
-    /** @return array<string, array{array<string, mixed>}> */
-    public static function attentionPages(): array
-    {
-        return [
-            'limit' => [['status' => 'needs_attention', 'limit' => 5]],
-            'before' => [['status' => 'needs_attention', 'before' => 'apr_' . str_repeat('c', 32)]],
-        ];
-    }
-
-    /** @param array<string, mixed> $params */
-    #[\PHPUnit\Framework\Attributes\DataProvider('attentionPages')]
-    public function testPagingNeedsAttentionIsRefusedBeforeSending(array $params): void
-    {
-        $siren = $this->mockSiren([], ['accessToken' => 'session-token', 'apiKey' => null]);
-
-        try {
-            $siren->apps->requests->list($params);
-            $this->fail('The list was not refused.');
-        } catch (\InvalidArgumentException $e) {
-            $this->assertSame('apps->requests->list() pages the plain list only. Siren answers needs_attention whole, so leave out limit and before.', $e->getMessage());
-        }
-
-        $this->assertSame([], $this->history);
     }
 
     public function testNeedsAttentionAloneIsStillSent(): void
