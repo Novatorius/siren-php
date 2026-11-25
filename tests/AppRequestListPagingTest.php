@@ -22,7 +22,7 @@ final class AppRequestListPagingTest extends TestCase
 
     public function testTheListTakesLimitAndBefore(): void
     {
-        $this->assertSame(['status', 'limit', 'before'], AppRequests::LIST_FILTERS);
+        $this->assertSame(['status', 'limit', 'before', 'idPrefix'], AppRequests::LIST_FILTERS);
         $this->assertSame(100, AppRequests::MAX_LIST_LIMIT);
     }
 

@@ -1224,6 +1224,15 @@ if ($page !== []) {
 
 Siren answers `needs_attention` whole, so `list()` refuses `limit` or
 `before` with it.
+
+`idPrefix` finds requests by the start of their id, `apr_` and 4 to 32 hex
+characters, as the CLI prints an id short. Siren answers at most two of the
+organization's matches, newest first, so two rows mean the prefix fits more
+than one request. It takes no other param beside it:
+
+```php
+$matches = $siren->apps->requests->list(['idPrefix' => 'apr_9f2c']);
+```
 `resend()` is sent once. Siren applies a stored answer it hasn't applied
 instead of sending the request again, and answers 409
 `app_request_not_resendable` for a request that is `applied`, a `delivered`
@@ -1904,7 +1913,7 @@ the subscription calls sit on `WebhookSubscriptions` beside `create`, `list`,
 | `webhooks->subscriptions->update` | no | an id below 1, any key outside `UPDATE_FIELDS` whatever its value, and an update with no field that is not `null` |
 | `webhooks->subscriptions->test` | no | an id below 1 |
 | `webhooks->subscriptions->deliveries` | yes | an id below 1 |
-| `apps->requests->list` | yes | a key other than `status`, `limit` and `before`, a status outside `STATUSES`, a `limit` outside 1 to 100, a `before` that is not a request id, and either with `needs_attention` |
+| `apps->requests->list` | yes | a key other than `status`, `limit`, `before` and `idPrefix`, a status outside `STATUSES`, a `limit` outside 1 to 100, a `before` that is not a request id, either with `needs_attention`, an `idPrefix` that is not `apr_` and 4 to 32 hex characters, and any other key with `idPrefix` |
 | `apps->requests->retrieve` | yes | an id that is not `apr_` and 32 lowercase hex characters |
 | `apps->requests->resend` | no | an id that is not `apr_` and 32 lowercase hex characters |
 | `apps->features->create` | no | a bad app key, a field outside `CREATE_FIELDS`, no `kind` or `name`, and `fulfillmentMethod` |

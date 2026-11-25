@@ -49,7 +49,10 @@ use Siren\Sdk\HttpTransport;
 final class AppRequests
 {
     /** The params {@see list()} sends, the ones `GET /apps/requests` reads (ListAppRequests.php in Siren). */
-    public const LIST_FILTERS = ['status', 'limit', 'before'];
+    public const LIST_FILTERS = ['status', 'limit', 'before', 'idPrefix'];
+
+    /** The start of a request id `idPrefix` takes: `apr_` and 4 to 32 hex characters, in either case. */
+    public const ID_PREFIX_PATTERN = '/^apr_[0-9a-fA-F]{4,32}$/';
 
     /** The most requests one page holds. Siren lists 50 when `limit` is absent. */
     public const MAX_LIST_LIMIT = 100;
@@ -122,14 +125,20 @@ final class AppRequests
      *   than it, so the last id of one page reads the next. Siren lists none
      *   for an id the organization has no request for.
      *
+     * - `idPrefix` finds requests by the start of their id, `apr_` and 4 to
+     *   32 hex characters, as the CLI prints an id short. Siren answers at
+     *   most 2 of the organization's matches, newest first, so 2 rows mean
+     *   the prefix fits more than one request and a longer one is needed.
+     *   Siren ignores the other params beside it, so they are refused.
+     *
      * Siren answers `needs_attention` whole, so `limit` or `before` with it
      * is refused, as in Node.
      *
-     * @param array{status?: string, limit?: int, before?: string} $params
+     * @param array{status?: string, limit?: int, before?: string, idPrefix?: string} $params
      *
      * @return list<AppRequestRecord>
      *
-     * @throws \InvalidArgumentException For a param other than {@see LIST_FILTERS}, a status outside {@see STATUSES}, a `limit` that is not a whole number from 1 to 100, a `before` that is not a request id, or either with `needs_attention`.
+     * @throws \InvalidArgumentException For a param other than {@see LIST_FILTERS}, a status outside {@see STATUSES}, a `limit` that is not a whole number from 1 to 100, a `before` that is not a request id, either with `needs_attention`, an `idPrefix` that is not the start of a request id, or any other param with `idPrefix`.
      * @throws ApiException When Siren answers 2xx with no list of requests.
      * @throws SirenException When Siren refuses it.
      */
@@ -143,6 +152,10 @@ final class AppRequests
                     implode(', ', self::LIST_FILTERS),
                 ));
             }
+        }
+
+        if (array_key_exists('idPrefix', $params)) {
+            return $this->findByIdPrefix($params);
         }
 
         $status = $params['status'] ?? null;
@@ -177,6 +190,36 @@ final class AppRequests
             $query['before'] = $before;
         }
 
+        return $this->rows($query);
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     *
+     * @return list<AppRequestRecord>
+     */
+    private function findByIdPrefix(array $params): array
+    {
+        $prefix = $params['idPrefix'];
+
+        if (!is_string($prefix) || preg_match(self::ID_PREFIX_PATTERN, $prefix) !== 1) {
+            throw new \InvalidArgumentException('apps->requests->list() takes an idPrefix of apr_ and 4 to 32 hex characters, the start of a request id.');
+        }
+
+        if (count($params) > 1) {
+            throw new \InvalidArgumentException('apps->requests->list() finds by idPrefix alone. Siren ignores status, limit and before beside it, so leave them out.');
+        }
+
+        return $this->rows(['idPrefix' => $prefix]);
+    }
+
+    /**
+     * @param array<string, string|int> $query
+     *
+     * @return list<AppRequestRecord>
+     */
+    private function rows(array $query): array
+    {
         $body = $this->transport->request('GET', '/apps/requests', null, $query)->json();
         $rows = $body['requests'] ?? null;
 
