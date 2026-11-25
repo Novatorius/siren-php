@@ -258,6 +258,238 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /apps/{app}/features:
+    post:
+      tags: [Apps]
+      operationId: createAppFeature
+      summary: Add a feature to an app
+      description: |
+        Adds one feature to the app, as the dashboard's "New feature" does,
+        and answers it with `uses` and `usedBy`. Siren answers 201, or 200
+        when an archived feature of the same kind and key came back with the
+        new fields. With no `key`, Siren makes one from the name.
+        `apps->features->create()` sends it once.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/AppKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppFeatureInput' }
+      responses:
+        '200':
+          description: An archived feature of the same kind and key came back.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppFeature' }
+        '201':
+          description: The feature was added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppFeature' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The organization has no app with this key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`error.code` is `app_features_need_key_and_address`, with `error.data.missing`, when the app lacks a key or an address.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: A field Siren refuses, named in `error.data.field`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /apps/{app}/features/{id}:
+    parameters:
+      - $ref: '#/components/parameters/AppKey'
+      - name: id
+        in: path
+        required: true
+        description: The feature's id.
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Apps]
+      operationId: getAppFeature
+      summary: Read one feature
+      description: The feature with `uses`, how many records pick it, and `usedBy`, up to 100 of them. Siren answers 404 for a feature another app holds.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The feature.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppFeature' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`Feature not found.`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    patch:
+      tags: [Apps]
+      operationId: updateAppFeature
+      summary: Change a feature
+      description: Changes a feature's name, description or settings. A field left out keeps its value. Siren refuses a changed `kind` or `key` with 422.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppFeatureInput' }
+      responses:
+        '200':
+          description: The feature as it now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppFeature' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`Feature not found.`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: A field Siren refuses, named in `error.data.field`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Apps]
+      operationId: deleteAppFeature
+      summary: Remove a feature
+      description: Archives the feature while a record picks it, and deletes it otherwise.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: '`feature` is the archived feature, or null once it was deleted.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [archived, feature]
+                properties:
+                  archived: { type: boolean }
+                  feature:
+                    oneOf:
+                      - { $ref: '#/components/schemas/AppFeature' }
+                      - { type: 'null' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`Feature not found.`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /apps/requests:
+    get:
+      tags: [Apps]
+      operationId: listAppRequests
+      summary: List the requests Siren sent the organization's apps
+      description: The latest requests, newest first, at most 50. `apps->requests->list()` reads it.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, sent, delivered, answered, applied, needs_attention, dropped] }
+      responses:
+        '200':
+          description: The requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/AppRequestRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /apps/requests/{requestKey}:
+    get:
+      tags: [Apps]
+      operationId: getAppRequest
+      summary: Read one request Siren sent an app
+      description: The list's fields, the `data` Siren sent the app, the `answer` it took or null, and `answeredByUser`, the person who answered by hand, or null.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestKey'
+      responses:
+        '200':
+          description: The request.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/AppRequestRecord' }
+                  - type: object
+                    required: [data, answer, answeredByUser]
+                    properties:
+                      data: { type: object, additionalProperties: true }
+                      answer:
+                        oneOf:
+                          - { type: object, additionalProperties: true }
+                          - { type: 'null' }
+                      answeredByUser:
+                        oneOf:
+                          - type: object
+                            required: [id, email]
+                            properties:
+                              id: { type: integer }
+                              email: { type: string }
+                          - { type: 'null' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`error.code` is `app_request_not_found`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /apps/requests/{requestKey}/resend:
+    post:
+      tags: [Apps]
+      operationId: resendAppRequest
+      summary: Send a request again
+      description: |
+        Sends the request again under the same key, and gives an ask a new
+        answer window. A request that holds an answer Siren hasn't applied is
+        not sent again: Siren applies its stored answer instead.
+        `apps->requests->resend()` sends it once.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestKey'
+      responses:
+        '200':
+          description: The request as it now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppRequestRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`error.code` is `plan_required` when the organization''s plan does not send to the feature''s kind.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`error.code` is `app_request_not_found`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`error.code` is `app_request_not_resendable` for a request that is `applied`, a `delivered` tell, or one Siren would send while its app is off.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /apps/requests/{requestKey}/answer:
     post:
       tags: [Apps]
@@ -2860,6 +3092,18 @@ components:
       description: The opportunity (tracking) id associated with the event, a whole number.
       schema: { type: integer }
   parameters:
+    AppKey:
+      name: app
+      in: path
+      required: true
+      description: The app's key, lowercase letters and digits joined by single dashes, at most 64 characters, and never requests, events, scopes or kinds.
+      schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 64 }
+    RequestKey:
+      name: requestKey
+      in: path
+      required: true
+      description: The request's `id`, `apr_` and 32 lowercase hex characters.
+      schema: { type: string, pattern: '^apr_[0-9a-f]{32}$' }
     Number:
       name: number
       in: query
@@ -2907,6 +3151,59 @@ components:
       description: The same one-store filter as `propertyId`, sent as a header.
       schema: { type: integer, minimum: 1 }
   schemas:
+    AppFeatureInput:
+      type: object
+      description: A feature's fields. `kind` and `name` are needed to add one, and `kind` and `key` never change once Siren makes it.
+      properties:
+        kind: { type: string, description: 'One of the kinds `GET /apps/kinds` lists, such as `payoutMethod`.' }
+        key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        currencies: { type: array, items: { type: string } }
+        answerWindowMinutes: { type: integer, minimum: 1, maximum: 43200 }
+        scoresMoney: { type: boolean }
+        conversionTypes: { type: array, items: { type: string } }
+        fields: { type: array, items: { type: object, additionalProperties: true } }
+        domains: { type: array, items: { type: string } }
+      additionalProperties: false
+    AppFeature:
+      type: object
+      required: [id, kind, key, name]
+      properties:
+        id: { type: integer }
+        ref: { type: string, description: '`app:{id}`.' }
+        appId: { type: integer }
+        kind: { type: string }
+        key: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        settings: { type: object, additionalProperties: true }
+        status: { type: string }
+        uses: { type: integer }
+        usedBy: { type: array, items: { type: object, additionalProperties: true } }
+      additionalProperties: true
+    AppRequestRecord:
+      type: object
+      required: [id, appId, feature, kind, mode, status]
+      properties:
+        id: { type: string, pattern: '^apr_[0-9a-f]{32}$' }
+        appId: { type: integer }
+        feature: { type: string, description: '`app:{id}` of the feature Siren acted for.' }
+        kind: { type: string }
+        mode: { type: string, enum: [tell, ask] }
+        subject:
+          type: object
+          properties:
+            type: { type: string }
+            id: { type: string }
+        status: { type: string, enum: [pending, sent, delivered, answered, applied, needs_attention, dropped] }
+        sendCount: { type: integer }
+        answerBy: { type: [string, 'null'], format: date-time }
+        answeredBy: { type: [string, 'null'], description: '`app:{appId}` or `user:{userId}`.' }
+        answeredAt: { type: [string, 'null'], format: date-time }
+        lastError: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+      additionalProperties: true
     Record:
       type: object
       description: |

@@ -9,6 +9,7 @@ use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\ServerRequest;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Siren\Sdk\AppRequestHandler;
+use Siren\Sdk\Exception\AppHandlerException;
 use Siren\Sdk\Exception\SirenException;
 use Siren\Sdk\Siren;
 use Siren\Sdk\Testing\AppRequests;
@@ -328,7 +329,7 @@ final class AppRequestDxTest extends TestCase
         $result = $handler->simulate(self::ask());
 
         $this->assertNull($result->answer);
-        $this->assertInstanceOf(\InvalidArgumentException::class, $result->error);
+        $this->assertInstanceOf(AppHandlerException::class, $result->error);
         $this->assertStringContainsString('outcome', $result->error->getMessage());
     }
 
@@ -436,7 +437,7 @@ final class AppRequestDxTest extends TestCase
         try {
             $this->mockSiren([])->apps->requestHandler();
             $this->fail('A handler with no secret was made.');
-        } catch (\InvalidArgumentException $e) {
+        } catch (AppHandlerException $e) {
             $this->assertStringContainsString('signing secret', $e->getMessage());
             $this->assertStringContainsString('SIREN_SIGNING_SECRET', $e->getMessage());
         }

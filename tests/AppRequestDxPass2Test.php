@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Siren\Sdk\FeatureKind;
 use Siren\Sdk\AppRequest;
 use Siren\Sdk\AppRequestHandler;
+use Siren\Sdk\Exception\AppHandlerException;
 use Siren\Sdk\Exception\ValidationException;
 use Siren\Sdk\Testing\AppRequests;
 use Siren\Sdk\Testing\SignedRequest;
@@ -117,7 +118,7 @@ final class AppRequestDxPass2Test extends TestCase
         try {
             $this->handler()->on($kind, 'the-key', static fn () => []);
             $this->fail('on() took ' . $kind);
-        } catch (\InvalidArgumentException $e) {
+        } catch (AppHandlerException $e) {
             $this->assertSame($words, $e->getMessage());
         }
     }
@@ -128,7 +129,7 @@ final class AppRequestDxPass2Test extends TestCase
         try {
             $this->handler()->on($kind, static fn () => []);
             $this->fail('on() took ' . $kind);
-        } catch (\InvalidArgumentException $e) {
+        } catch (AppHandlerException $e) {
             $this->assertSame($words, $e->getMessage());
         }
     }
@@ -182,7 +183,7 @@ final class AppRequestDxPass2Test extends TestCase
     #[DataProvider('badExtraKinds')]
     public function testExtraKindsMustBeAListOfKinds(mixed $extraKinds): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(AppHandlerException::class);
         $this->expectExceptionMessage('apps->requestHandler() takes extraKinds as a list of kinds, such as [\'payoutReview\'].');
 
         $this->mockSiren([])->apps->requestHandler(self::SECRET, ['extraKinds' => $extraKinds]);
@@ -260,7 +261,7 @@ final class AppRequestDxPass2Test extends TestCase
         $body = json_decode($request->rawBody, true);
 
         return sprintf(
-            'Siren sends it again after %s UTC, when its answer window closes. Resend it sooner from Needs attention in Siren Cloud, or with `siren apps resend %s`.',
+            'Siren sends it again after %s UTC, when its answer window closes. Resend it sooner with `siren apps resend %s`.',
             gmdate('H:i', (int) strtotime($body['answerBy'])),
             $body['id'],
         );
@@ -342,7 +343,7 @@ final class AppRequestDxPass2Test extends TestCase
         $this->assertStringContainsString(
             '| When your function fails | A tell gets 500, and Siren tries again about 1, 2, 4 and 8 minutes later. '
             . 'An ask already got its 200, so Siren sends it again when its answer window closes, 60 minutes by default. '
-            . 'Resend it sooner from Needs attention in Siren Cloud, or with `siren apps resend <id>`. `onError` hears why either way. |',
+            . 'Resend it sooner with `siren apps resend <id>`. `onError` hears why either way. |',
             $readme,
         );
     }
@@ -354,7 +355,7 @@ final class AppRequestDxPass2Test extends TestCase
         $this->assertFalse(class_exists('Siren\\Sdk\\AppFeatureKind'), 'FeatureKind holds what AppFeatureKind held.');
         $this->assertFalse(class_exists('Siren\\Sdk\\AppItemKind'), 'FeatureKind replaces AppItemKind, with no old name kept.');
         $this->assertSame(['postConversionAction', 'postAllocationAction'], FeatureKind::TELLS);
-        $this->assertStringContainsString('@phpstan-type AppDistributionAnswer', (string) (new \ReflectionClass(FeatureKind::class))->getDocComment());
+        $this->assertStringContainsString('@phpstan-type DistributionResolverAnswer', (string) (new \ReflectionClass(FeatureKind::class))->getDocComment());
     }
 
     public function testTheRequestNamesTheIdToDedupeOn(): void

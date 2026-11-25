@@ -21,6 +21,7 @@ use Siren\Sdk\Exception\ConnectionException;
 use Siren\Sdk\Exception\NotFoundException;
 use Siren\Sdk\Exception\PermissionException;
 use Siren\Sdk\Exception\SignatureVerificationException;
+use Siren\Sdk\Exception\AppHandlerException;
 use Siren\Sdk\Exception\SirenException;
 use Siren\Sdk\Exception\ValidationException;
 use Siren\Sdk\Resources\AppRequests;
@@ -518,7 +519,7 @@ final class AppRequestHandlerTest extends TestCase
 
         $this->assertSame([], $this->history);
         $this->assertCount(1, $this->errors);
-        $this->assertInstanceOf(\InvalidArgumentException::class, $this->errors[0][0]);
+        $this->assertInstanceOf(AppHandlerException::class, $this->errors[0][0]);
         $this->assertStringContainsString($words, $this->errors[0][0]->getMessage());
         $this->assertInstanceOf(AppRequest::class, $this->errors[0][1]);
     }
@@ -709,7 +710,7 @@ final class AppRequestHandlerTest extends TestCase
         try {
             $this->mockSiren([], ['baseUrl' => self::FIXTURE_SIREN])->apps->requestHandler($secret, $options);
             $this->fail('A bad option was taken.');
-        } catch (\InvalidArgumentException $e) {
+        } catch (AppHandlerException $e) {
             $this->assertStringContainsString('apps->requestHandler()', $e->getMessage());
             $this->assertStringContainsString($words, $e->getMessage());
         }
@@ -730,13 +731,13 @@ final class AppRequestHandlerTest extends TestCase
             try {
                 $register();
                 $this->fail('Registration ' . $i . ' was taken.');
-            } catch (\InvalidArgumentException $e) {
+            } catch (AppHandlerException $e) {
                 $this->assertMatchesRegularExpression('/->on(Event)?\(\)/', $e->getMessage());
             }
         }
 
         $handler->on('incentiveResolver', static fn() => null);
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(AppHandlerException::class);
         $handler->on('incentiveResolver', static fn() => null);
     }
 

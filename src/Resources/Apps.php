@@ -30,12 +30,16 @@ final class Apps
     /** The event type of a request Siren sends an app. */
     public const REQUEST_EVENT = 'app.request';
 
-    /** Answer an ask: `answer`. */
+    /** The requests Siren sends: `answer`, and for an admin `list`, `retrieve` and `resend`. */
     public readonly AppRequests $requests;
+
+    /** One app's features: `create`, `retrieve`, `update` and `delete`. */
+    public readonly AppFeatures $features;
 
     public function __construct(HttpTransport $transport)
     {
         $this->requests = new AppRequests($transport);
+        $this->features = new AppFeatures($transport);
     }
 
     /**

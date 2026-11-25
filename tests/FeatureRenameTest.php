@@ -76,7 +76,7 @@ final class FeatureRenameTest extends TestCase
             $summary = trim(preg_replace('/^\s*\*\s?/', '', $lines[1] ?? '') ?? '');
             $expected = strcasecmp($kind['term'], $kind['name']) === 0
                 ? $kind['name'] . '.'
-                : $kind['name'] . '. Siren\'s own term: ' . $kind['term'] . '.';
+                : $kind['name'] . '. Siren\'s code calls it the ' . $kind['term'] . '.';
 
             $this->assertSame($expected, $summary, 'The hover docs for ' . $kind['kind'] . ' start with its name.');
         }

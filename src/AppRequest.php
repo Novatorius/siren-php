@@ -13,6 +13,11 @@ namespace Siren\Sdk;
  * {@see $id}, the one id that stays the same. A `tell` waits for no answer.
  * An `ask` is answered with {@see Resources\AppRequests::answer()} by
  * {@see $answerBy}.
+ *
+ * `TData` is the shape of {@see $data}, which {@see AppRequestHandler::on()}
+ * sets from the kind, such as `AppRequest<DistributionResolverQuestion>`.
+ *
+ * @template TData of array<string, mixed> = array<string, mixed>
  */
 final class AppRequest
 {
@@ -22,9 +27,9 @@ final class AppRequest
      * @param string $app The app's key.
      * @param array{kind: string, key: string, id: string} $feature The feature asked: its kind, its key and its `app:{n}` id. `feature.id` names the feature, not the request, so many requests share it.
      * @param string $createdAt When Siren recorded the request, ISO 8601.
-     * @param string|null $answerBy When an ask stops waiting for this send, ISO 8601. Null for a tell.
+     * @param string|null $answerBy When an ask stops waiting for this send, an ISO 8601 string as Siren sends it, such as `2026-11-17T13:20:03+00:00`. Null for a tell.
      * @param string|null $answerUrl Where an ask's answer goes. Null for a tell.
-     * @param array<string, mixed> $data The question, shaped by the feature's kind.
+     * @param TData $data The question, shaped by the feature's kind.
      * @param int $timestamp The Unix time Siren signed the send at.
      * @param string|null $deliveryId The `X-Siren-Delivery` header, when present. It names one delivery and changes on every send, so never dedupe on it.
      * @param array<string, mixed> $body The whole signed body, decoded.

@@ -14,8 +14,8 @@ use Siren\Sdk\FeatureKind;
  * (6d2abd936a), and the payoutMethod request in
  * tests/Fixtures/apps-feature-contracts/requests.json.
  *
- * @phpstan-import-type AppPayoutQuestion from FeatureKind
- * @phpstan-import-type AppPayoutAnswer from FeatureKind
+ * @phpstan-import-type PayoutMethodQuestion from FeatureKind
+ * @phpstan-import-type PayoutMethodAnswer from FeatureKind
  */
 final class AppPayoutMethodTest extends TestCase
 {
@@ -32,7 +32,7 @@ final class AppPayoutMethodTest extends TestCase
         return $contracts['kinds']['payoutMethod']['request']['data'];
     }
 
-    /** @return AppPayoutQuestion */
+    /** @return PayoutMethodQuestion */
     private static function question(): array
     {
         return [
@@ -42,7 +42,7 @@ final class AppPayoutMethodTest extends TestCase
         ];
     }
 
-    /** @return list<AppPayoutAnswer> */
+    /** @return list<PayoutMethodAnswer> */
     private static function answers(): array
     {
         return [
@@ -61,7 +61,7 @@ final class AppPayoutMethodTest extends TestCase
     {
         $source = self::source();
 
-        $this->assertStringContainsString('@phpstan-type AppPayoutQuestion array{', $source);
+        $this->assertStringContainsString('@phpstan-type PayoutMethodQuestion array{', $source);
         $this->assertStringContainsString('payout: array{id: int, fulfillmentId: int, attempt: int},', $source);
         $this->assertStringContainsString('amount: array{value: int, units: string, currency: AppCurrency},', $source);
         $this->assertStringContainsString('collaborator: array{id: int, name: string, email: string|null},', $source);
@@ -79,9 +79,9 @@ final class AppPayoutMethodTest extends TestCase
     {
         $source = self::source();
 
-        $this->assertStringContainsString("@phpstan-type AppPayoutPaidAnswer array{outcome: 'paid', reference: non-empty-string}", $source);
-        $this->assertStringContainsString("@phpstan-type AppPayoutFailedAnswer array{outcome: 'failed', reason: non-empty-string}", $source);
-        $this->assertStringContainsString('@phpstan-type AppPayoutAnswer AppPayoutPaidAnswer|AppPayoutFailedAnswer', $source);
+        $this->assertStringContainsString("@phpstan-type PayoutMethodPaidAnswer array{outcome: 'paid', reference: non-empty-string}", $source);
+        $this->assertStringContainsString("@phpstan-type PayoutMethodFailedAnswer array{outcome: 'failed', reason: non-empty-string}", $source);
+        $this->assertStringContainsString('@phpstan-type PayoutMethodAnswer PayoutMethodPaidAnswer|PayoutMethodFailedAnswer', $source);
         $this->assertSame(['outcome', 'reference'], array_keys(self::answers()[0]));
         $this->assertSame(['outcome', 'reason'], array_keys(self::answers()[1]));
     }
@@ -91,7 +91,7 @@ final class AppPayoutMethodTest extends TestCase
         $source = self::source();
 
         $this->assertStringNotContainsString("'payoutId' =>", $source);
-        $this->assertStringContainsString('The question is an `AppPayoutQuestion`', $source);
-        $this->assertStringContainsString('the answer an `AppPayoutAnswer`', $source);
+        $this->assertStringContainsString('The question is a `PayoutMethodQuestion`', $source);
+        $this->assertStringContainsString('the answer a `PayoutMethodAnswer`', $source);
     }
 }

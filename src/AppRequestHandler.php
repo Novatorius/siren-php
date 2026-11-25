@@ -6,6 +6,7 @@ namespace Siren\Sdk;
 
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
+use Siren\Sdk\Exception\AppHandlerException;
 use Siren\Sdk\Exception\ConflictException;
 use Siren\Sdk\Exception\ErrorCode;
 use Siren\Sdk\Exception\SignatureVerificationException;
@@ -24,7 +25,7 @@ use Siren\Sdk\Testing\SignedRequest;
  * Make it with `$siren->apps->requestHandler($signingSecret, $options)`.
  *
  * ```php
- * $siren->apps->requestHandler(getenv('SIREN_SIGNING_SECRET'))
+ * $siren->apps->requestHandler()
  *     ->on('distributionResolver', 'split-by-score', fn ($request) => [
  *         'outcome' => 'allocated',
  *         'units' => $request->data['pool']['units'],
@@ -66,6 +67,40 @@ use Siren\Sdk\Testing\SignedRequest;
  * an ask again each time its answer window closes with no answer, so a
  * function writes once by `$request->id` and an ask's function returns the
  * same answer each time.
+ *
+ * PHPStan types each function by its kind, with no class and no cast: the
+ * function's `$request->data` is the kind's question, such as
+ * `DistributionResolverQuestion`, and what it returns must be the kind's
+ * answer or {@see later()}. A misspelled field, a wrong `outcome` or a kind
+ * Siren never sends is an error before the code runs. {@see FeatureKind}
+ * holds the shapes.
+ *
+ * generated:start, by bin/feature-kinds.php from resources/app-kinds.json
+ * @phpstan-import-type PostConversionActionTell from FeatureKind
+ * @phpstan-import-type PostAllocationActionTell from FeatureKind
+ * @phpstan-import-type PayoutMethodQuestion from FeatureKind
+ * @phpstan-import-type PayoutMethodAnswer from FeatureKind
+ * @phpstan-import-type DistributionResolverQuestion from FeatureKind
+ * @phpstan-import-type DistributionResolverAnswer from FeatureKind
+ * @phpstan-import-type MetricCalculationQuestion from FeatureKind
+ * @phpstan-import-type MetricCalculationAnswer from FeatureKind
+ * @phpstan-import-type MetricFilterQuestion from FeatureKind
+ * @phpstan-import-type MetricFilterAnswer from FeatureKind
+ * @phpstan-import-type IncentiveResolverQuestion from FeatureKind
+ * @phpstan-import-type IncentiveResolverAnswer from FeatureKind
+ * @phpstan-import-type TransactionFilterQuestion from FeatureKind
+ * @phpstan-import-type TransactionFilterAnswer from FeatureKind
+ * @phpstan-import-type IncentiveTypeQuestion from FeatureKind
+ * @phpstan-import-type IncentiveTypeAnswer from FeatureKind
+ * @phpstan-import-type EngagementCalculationQuestion from FeatureKind
+ * @phpstan-import-type EngagementCalculationAnswer from FeatureKind
+ * @phpstan-import-type EngagementFilterQuestion from FeatureKind
+ * @phpstan-import-type EngagementFilterAnswer from FeatureKind
+ * @phpstan-import-type ProgramGroupSorterQuestion from FeatureKind
+ * @phpstan-import-type ProgramGroupSorterAnswer from FeatureKind
+ * @phpstan-import-type CollaboratorGroupStructureQuestion from FeatureKind
+ * @phpstan-import-type CollaboratorGroupStructureAnswer from FeatureKind
+ * generated:end
  */
 final class AppRequestHandler
 {
@@ -129,7 +164,7 @@ final class AppRequestHandler
      *
      * @param array<string, mixed> $options
      *
-     * @throws \InvalidArgumentException For an empty secret or an option it can't use.
+     * @throws AppHandlerException For an empty secret or an option it can't use.
      */
     public function __construct(
         private readonly AppRequests $requests,
@@ -137,14 +172,14 @@ final class AppRequestHandler
         array $options = [],
     ) {
         if ($secret === '') {
-            throw new \InvalidArgumentException(
+            throw new AppHandlerException(
                 "apps->requestHandler() needs the app's signing secret, which Siren showed when it made the app. Pass it, or set SIREN_SIGNING_SECRET.",
             );
         }
 
         foreach (array_keys($options) as $name) {
             if (!in_array($name, self::OPTIONS, true)) {
-                throw new \InvalidArgumentException(sprintf(
+                throw new AppHandlerException(sprintf(
                     'apps->requestHandler() takes the options %s, and not %s.',
                     implode(', ', self::OPTIONS),
                     $name,
@@ -155,7 +190,7 @@ final class AppRequestHandler
         $tolerance = $options['toleranceSeconds'] ?? Apps::DEFAULT_TOLERANCE_SECONDS;
 
         if (!is_int($tolerance) || $tolerance < 1 || $tolerance > Apps::MAX_TOLERANCE_SECONDS) {
-            throw new \InvalidArgumentException(sprintf(
+            throw new AppHandlerException(sprintf(
                 'apps->requestHandler() takes toleranceSeconds as a whole number from 1 to %d.',
                 Apps::MAX_TOLERANCE_SECONDS,
             ));
@@ -164,20 +199,20 @@ final class AppRequestHandler
         $runLater = $options['runLater'] ?? null;
 
         if ($runLater !== null && !is_callable($runLater)) {
-            throw new \InvalidArgumentException('apps->requestHandler() takes runLater as a function that is handed the work, such as fn ($work) => app()->terminating($work).');
+            throw new AppHandlerException('apps->requestHandler() takes runLater as a function that is handed the work, such as fn ($work) => app()->terminating($work).');
         }
 
         $onError = $options['onError'] ?? null;
 
         if ($onError !== null && !is_callable($onError)) {
-            throw new \InvalidArgumentException('apps->requestHandler() takes onError as a function of the error and the request or event, or null.');
+            throw new AppHandlerException('apps->requestHandler() takes onError as a function of the error and the request or event, or null.');
         }
 
         $extraKinds = $options['extraKinds'] ?? [];
 
         if (!is_array($extraKinds) || !array_is_list($extraKinds)
             || array_filter($extraKinds, static fn ($kind): bool => !is_string($kind) || $kind === '') !== []) {
-            throw new \InvalidArgumentException("apps->requestHandler() takes extraKinds as a list of kinds, such as ['payoutReview'].");
+            throw new AppHandlerException("apps->requestHandler() takes extraKinds as a list of kinds, such as ['payoutReview'].");
         }
 
         /** @var list<string> $extraKinds */
@@ -220,29 +255,37 @@ final class AppRequestHandler
      * the handler's `extraKinds`. Any other kind is refused at once, with
      * what to write instead, since Siren would never reach its function.
      *
-     * @param string                                $kind The feature's kind, such as `distributionResolver`.
-     * @param string|callable(AppRequest): mixed    $key  The feature's key, or the function for every key of the kind.
-     * @param (callable(AppRequest): mixed)|null    $fn   The function, when `$key` names a key.
+     * PHPStan reads the kind and types the function: its request's `data` is
+     * the kind's question and its return the kind's answer or {@see later()}.
+     * A kind from `extraKinds` is one PHPStan doesn't know, so that one call
+     * needs an ignore comment for `argument.type`.
      *
-     * @throws \InvalidArgumentException For an empty or unknown kind, an empty key, no function, or a second function for one feature.
+     * generated:start, by bin/feature-kinds.php from resources/app-kinds.json
+     * @template TKind of 'postConversionAction'|'postAllocationAction'|'payoutMethod'|'distributionResolver'|'metricCalculation'|'metricFilter'|'incentiveResolver'|'transactionFilter'|'incentiveType'|'engagementCalculation'|'engagementFilter'|'programGroupSorter'|'collaboratorGroupStructure'
+     * @param TKind $kind The feature's kind, such as `distributionResolver`, one of {@see FeatureKind::SENT}.
+     * @param (TKind is 'postConversionAction' ? (string|callable(AppRequest<PostConversionActionTell>): mixed) : (TKind is 'postAllocationAction' ? (string|callable(AppRequest<PostAllocationActionTell>): mixed) : (TKind is 'payoutMethod' ? (string|callable(AppRequest<PayoutMethodQuestion>): (PayoutMethodAnswer|AppAnswerLater)) : (TKind is 'distributionResolver' ? (string|callable(AppRequest<DistributionResolverQuestion>): (DistributionResolverAnswer|AppAnswerLater)) : (TKind is 'metricCalculation' ? (string|callable(AppRequest<MetricCalculationQuestion>): (MetricCalculationAnswer|AppAnswerLater)) : (TKind is 'metricFilter' ? (string|callable(AppRequest<MetricFilterQuestion>): (MetricFilterAnswer|AppAnswerLater)) : (TKind is 'incentiveResolver' ? (string|callable(AppRequest<IncentiveResolverQuestion>): (IncentiveResolverAnswer|AppAnswerLater)) : (TKind is 'transactionFilter' ? (string|callable(AppRequest<TransactionFilterQuestion>): (TransactionFilterAnswer|AppAnswerLater)) : (TKind is 'incentiveType' ? (string|callable(AppRequest<IncentiveTypeQuestion>): (IncentiveTypeAnswer|AppAnswerLater)) : (TKind is 'engagementCalculation' ? (string|callable(AppRequest<EngagementCalculationQuestion>): (EngagementCalculationAnswer|AppAnswerLater)) : (TKind is 'engagementFilter' ? (string|callable(AppRequest<EngagementFilterQuestion>): (EngagementFilterAnswer|AppAnswerLater)) : (TKind is 'programGroupSorter' ? (string|callable(AppRequest<ProgramGroupSorterQuestion>): (ProgramGroupSorterAnswer|AppAnswerLater)) : (string|callable(AppRequest<CollaboratorGroupStructureQuestion>): (CollaboratorGroupStructureAnswer|AppAnswerLater)))))))))))))) $key The feature's key, or the function for every key of the kind.
+     * @param (TKind is 'postConversionAction' ? (callable(AppRequest<PostConversionActionTell>): mixed)|null : (TKind is 'postAllocationAction' ? (callable(AppRequest<PostAllocationActionTell>): mixed)|null : (TKind is 'payoutMethod' ? (callable(AppRequest<PayoutMethodQuestion>): (PayoutMethodAnswer|AppAnswerLater))|null : (TKind is 'distributionResolver' ? (callable(AppRequest<DistributionResolverQuestion>): (DistributionResolverAnswer|AppAnswerLater))|null : (TKind is 'metricCalculation' ? (callable(AppRequest<MetricCalculationQuestion>): (MetricCalculationAnswer|AppAnswerLater))|null : (TKind is 'metricFilter' ? (callable(AppRequest<MetricFilterQuestion>): (MetricFilterAnswer|AppAnswerLater))|null : (TKind is 'incentiveResolver' ? (callable(AppRequest<IncentiveResolverQuestion>): (IncentiveResolverAnswer|AppAnswerLater))|null : (TKind is 'transactionFilter' ? (callable(AppRequest<TransactionFilterQuestion>): (TransactionFilterAnswer|AppAnswerLater))|null : (TKind is 'incentiveType' ? (callable(AppRequest<IncentiveTypeQuestion>): (IncentiveTypeAnswer|AppAnswerLater))|null : (TKind is 'engagementCalculation' ? (callable(AppRequest<EngagementCalculationQuestion>): (EngagementCalculationAnswer|AppAnswerLater))|null : (TKind is 'engagementFilter' ? (callable(AppRequest<EngagementFilterQuestion>): (EngagementFilterAnswer|AppAnswerLater))|null : (TKind is 'programGroupSorter' ? (callable(AppRequest<ProgramGroupSorterQuestion>): (ProgramGroupSorterAnswer|AppAnswerLater))|null : (callable(AppRequest<CollaboratorGroupStructureQuestion>): (CollaboratorGroupStructureAnswer|AppAnswerLater))|null)))))))))))) $fn The function, when `$key` names a key.
+     * generated:end
+     *
+     * @throws AppHandlerException For an empty or unknown kind, an empty key, no function, or a second function for one feature.
      */
     public function on(string $kind, string|callable $key, ?callable $fn = null): static
     {
         if ($kind === '') {
-            throw new \InvalidArgumentException("apps->requestHandler()->on() needs the feature's kind, such as 'distributionResolver'.");
+            throw new AppHandlerException("apps->requestHandler()->on() needs the feature's kind, such as 'distributionResolver'.");
         }
 
         if (!isset($this->kinds[$kind])) {
-            throw new \InvalidArgumentException(self::unknownKind($kind));
+            throw new AppHandlerException(self::unknownKind($kind));
         }
 
         if ($fn === null) {
             if (is_string($key)) {
-                throw new \InvalidArgumentException('apps->requestHandler()->on() needs a function: on($kind, $key, $fn) for one feature, or on($kind, $fn) for every feature of the kind.');
+                throw new AppHandlerException('apps->requestHandler()->on() needs a function: on($kind, $key, $fn) for one feature, or on($kind, $fn) for every feature of the kind.');
             }
 
             if (isset($this->byKind[$kind])) {
-                throw new \InvalidArgumentException(sprintf('apps->requestHandler()->on() already has a function for every %s feature.', $kind));
+                throw new AppHandlerException(sprintf('apps->requestHandler()->on() already has a function for every %s feature.', $kind));
             }
 
             $this->byKind[$kind] = $key;
@@ -251,11 +294,11 @@ final class AppRequestHandler
         }
 
         if (!is_string($key) || $key === '') {
-            throw new \InvalidArgumentException("apps->requestHandler()->on() needs the feature's key as text, such as 'split-by-score'.");
+            throw new AppHandlerException("apps->requestHandler()->on() needs the feature's key as text, such as 'split-by-score'.");
         }
 
         if (isset($this->byKey[$kind][$key])) {
-            throw new \InvalidArgumentException(sprintf('apps->requestHandler()->on() already has a function for %s %s.', $kind, $key));
+            throw new AppHandlerException(sprintf('apps->requestHandler()->on() already has a function for %s %s.', $kind, $key));
         }
 
         $this->byKey[$kind][$key] = $fn;
@@ -271,16 +314,16 @@ final class AppRequestHandler
      *
      * @param callable(WebhookEvent): mixed $fn
      *
-     * @throws \InvalidArgumentException For an empty type, `app.request`, or a second function for one type.
+     * @throws AppHandlerException For an empty type, `app.request`, or a second function for one type.
      */
     public function onEvent(string $type, callable $fn): static
     {
         if ($type === '' || $type === Apps::REQUEST_EVENT) {
-            throw new \InvalidArgumentException("apps->requestHandler()->onEvent() needs a webhook event's type, such as 'conversion.approved'. Register app requests with on().");
+            throw new AppHandlerException("apps->requestHandler()->onEvent() needs a webhook event's type, such as 'conversion.approved'. Register app requests with on().");
         }
 
         if (isset($this->byEvent[$type])) {
-            throw new \InvalidArgumentException(sprintf('apps->requestHandler()->onEvent() already has a function for %s.', $type));
+            throw new AppHandlerException(sprintf('apps->requestHandler()->onEvent() already has a function for %s.', $type));
         }
 
         $this->byEvent[$type] = $fn;
@@ -329,7 +372,9 @@ final class AppRequestHandler
         /** @var \Throwable|null $error */
         $error = $trace->error;
 
-        return new AppRequestSimulation($reply->status, $reply->headers, $reply->body, $answer, $error);
+        $body = json_decode($reply->body, true, 512, JSON_THROW_ON_ERROR);
+
+        return new AppRequestSimulation($reply->status, is_array($body) ? $body : [], $answer, $error);
     }
 
     /**
@@ -599,7 +644,7 @@ final class AppRequestHandler
         }
 
         if ($answer === null) {
-            $this->report(new \UnexpectedValueException(sprintf(
+            $this->report(new AppHandlerException(sprintf(
                 'The function for %s %s returned nothing. Return the answer, or return $answers->later() when you will answer with apps->requests->answer().',
                 $request->feature['kind'],
                 $request->feature['key'],
@@ -609,7 +654,7 @@ final class AppRequestHandler
         }
 
         if (!is_array($answer)) {
-            $this->report(new \InvalidArgumentException(sprintf(
+            $this->report(new AppHandlerException(sprintf(
                 "The function for %s %s returns the answer as an array, such as ['outcome' => '...'], or \$answers->later() to answer later, and it returned %s.",
                 $request->feature['kind'],
                 $request->feature['key'],
@@ -620,8 +665,14 @@ final class AppRequestHandler
         }
 
         try {
-            if ($trace !== null) {
+            try {
                 $this->requests->check($request->id, $answer);
+            } catch (\InvalidArgumentException $e) {
+                // The function's answer can't be sent, so the mistake is in the app's code.
+                throw new AppHandlerException($e->getMessage(), 0, null, null, $e);
+            }
+
+            if ($trace !== null) {
                 $problem = AppAnswerCheck::problem((string) $request->feature['kind'], $request->data, $answer);
 
                 if ($problem !== null) {
@@ -645,16 +696,29 @@ final class AppRequestHandler
 
     /**
      * What the default `onError` line adds for an ask that failed after its
-     * 200: Siren sends it again when its answer window closes, and a person
-     * can resend it sooner.
+     * 200: Siren sends it again when its answer window closes, in UTC with
+     * the day when it isn't today, and `siren apps resend` sends it sooner.
+     * Siren Cloud offers Send again only once a request needs attention, so
+     * the line names the command alone (ResendAppRequest.php and apps.ts
+     * resendAction() on Siren's feat/apps).
+     *
+     * @param AppRequest<array<string, mixed>> $request
      */
     private static function nextSend(AppRequest $request): string
     {
         $answerBy = $request->answerBy === null ? false : strtotime($request->answerBy);
-        $when = $answerBy === false ? '' : ' after ' . gmdate('H:i', $answerBy) . ' UTC';
+        $when = '';
+
+        if ($answerBy !== false) {
+            $when = ' after ' . gmdate('H:i', $answerBy) . ' UTC';
+
+            if (gmdate('Y-m-d', $answerBy) !== gmdate('Y-m-d')) {
+                $when .= ' on ' . gmdate('Y-m-d', $answerBy);
+            }
+        }
 
         return sprintf(
-            'Siren sends it again%s, when its answer window closes. Resend it sooner from Needs attention in Siren Cloud, or with `siren apps resend %s`.',
+            'Siren sends it again%s, when its answer window closes. Resend it sooner with `siren apps resend %s`.',
             $when,
             $request->id,
         );

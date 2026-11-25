@@ -16,7 +16,7 @@ use Siren\Sdk\AppRequest;
  * (tests/Fixtures/apps-feature-contracts/requests.json), signed now with the
  * secret of tests/Fixtures/apps-exchange.
  *
- * @phpstan-import-type AppCollaboratorGroupStructureProgramQuestion from FeatureKind
+ * @phpstan-import-type CollaboratorGroupStructureProgramQuestion from FeatureKind
  */
 final class AppCollaboratorGroupStructureTest extends TestCase
 {
@@ -49,7 +49,7 @@ final class AppCollaboratorGroupStructureTest extends TestCase
         ];
     }
 
-    /** @return AppCollaboratorGroupStructureProgramQuestion */
+    /** @return CollaboratorGroupStructureProgramQuestion */
     private static function programQuestion(): array
     {
         return [
@@ -110,9 +110,10 @@ final class AppCollaboratorGroupStructureTest extends TestCase
     {
         $source = (string) file_get_contents((string) (new ReflectionClass(FeatureKind::class))->getFileName());
 
-        $this->assertStringContainsString('@phpstan-type AppCollaboratorGroupStructureDistributorQuestion', $source);
-        $this->assertStringContainsString('@phpstan-type AppCollaboratorGroupStructureProgramQuestion', $source);
-        $this->assertSame(3, substr_count($source, 'members: list<array{collaboratorId: int, name: string, status: string, metadata: array<string, mixed>}>'), 'Each structure question types a member\'s status at the trigger.');
+        $this->assertStringContainsString('@phpstan-type CollaboratorGroupStructureDistributorQuestion', $source);
+        $this->assertStringContainsString('@phpstan-type CollaboratorGroupStructureProgramQuestion', $source);
+        $this->assertStringContainsString('@phpstan-type AppGroupMember array{collaboratorId: int, name: string, status: string, metadata: array<string, mixed>}', $source, 'A member carries its status at the trigger.');
+        $this->assertSame(2, substr_count($source, 'members: list<AppGroupMember>'), 'Each structure question types its members the same way.');
         $this->assertSame(
             ['group', 'members', 'for', 'triggeringCollaborator', 'cause', 'program', 'engagementType', 'programEngagementTypeId', 'args', 'opportunity'],
             array_keys(self::programQuestion()),
