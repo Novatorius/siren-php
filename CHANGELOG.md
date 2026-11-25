@@ -294,6 +294,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The README no longer documents `apiKeys` or `webhooks->subscriptions->create()`,
+  which call `/api-keys` and `POST /webhooks`. Siren Cloud answers those with 404
+  and 405, because an app owns its key and its address. The README points at
+  `siren apps apply` and `siren apps rotate-key` instead, says every
+  `/webhooks` route takes a session only, and drops the two retired webhook
+  scopes.
 - The README leads with what the SDK can do and the request handler, with a
   sample for plain PHP, PSR-15 frameworks such as Slim and Mezzio, and
   Laravel. It gives each kind of app feature a section under the name Siren

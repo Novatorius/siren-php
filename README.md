@@ -46,8 +46,8 @@ This SDK is the official PHP client for the Siren API. With it you can:
   `apps->requests->answer()`. See [Check and answer by hand](#check-and-answer-by-hand).
 - Record commerce and tracking events (`sale`, `refund`, `siteVisited`, and custom event types).
 - Verify signed webhooks in a single, constant-time call.
-- Manage webhook subscriptions, with an API key or a signed-in dashboard
-  session's token, and API keys, with a session's token.
+- Read, change, test and remove an app's webhook address, and read its
+  deliveries, with a signed-in dashboard session's token.
 - Reconcile Siren's ledger (conversions, transactions, obligations, payouts
   and fulfillments) against your own, with an API key, a dashboard session's
   token or a connected site's token.
@@ -1273,21 +1273,14 @@ does the same with the three header values passed one by one. A
 delivery whose body is the bare payload is refused without `$eventType`,
 because only the `X-Siren-Event` header names its event.
 
-Create a subscription (the `signingSecret` is returned **once** — store it).
-An API key that holds `webhook-subscriptions:manage` can do this, and so can
-a signed-in dashboard session's access token:
+An address belongs to an app. Siren Cloud has no `POST /webhooks` route and
+answers it with 405. Give an app its address with `siren apps apply`, from the
+app file's `url` and `events`, or on the app's page in Siren Cloud. Siren
+shows the signing secret once, when it makes the address, and `siren apps
+apply` writes it to the app's `.env` file. The CLI comes with the Node
+package, so a PHP project runs it with `npx @novatorius/siren apps apply`.
 
 ```php
-$siren = new Siren(['apiKey' => 'sk_live_...']); // a key with ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE
-
-$subscription = $siren->webhooks->subscriptions->create([
-    'targetUrl' => 'https://example.com/webhooks/siren',
-    'events'    => [WebhookEventType::CONVERSION_APPROVED, WebhookEventType::PAYOUT_PAID],
-    // or [WebhookEventType::ALL] to subscribe to everything
-]);
-
-$secret = $subscription['signingSecret'];
-
 $siren->webhooks->subscriptions->events(); // the live catalog: [{event, category, label}, ...]
 ```
 
@@ -1297,8 +1290,7 @@ $siren->webhooks->subscriptions->events(); // the live catalog: [{event, categor
 `deliveries($id)` reads its latest 50 deliveries, newest first. Each delivery
 carries the payload Siren sent, its status (`pending`, `delivered` or
 `failed`), the tries it took and the first 200 bytes of your endpoint's
-answer. Both take `webhook-subscriptions:read` or
-`webhook-subscriptions:manage`, and both retry as reads.
+answer. Both retry as reads.
 
 `update($id, $params)` changes the target URL, the events, the status or the
 description, and sends only the fields you give. Any other key throws
@@ -1306,20 +1298,25 @@ description, and sends only the fields you give. Any other key throws
 that is not `null`, because Siren skips a `null` field and cannot apply an
 update with nothing to change. `test($id)` makes Siren send one
 signed `webhook.test` delivery now and answers what your endpoint did. Siren
-answers 200 either way, so read `delivered`. Both take
-`webhook-subscriptions:manage`, and each is sent once.
+answers 200 either way, so read `delivered`. Each is sent once.
+
+Every `webhooks->subscriptions` call takes a signed-in dashboard session's
+access token. Siren refuses an API key on every `/webhooks` route with 401
+`api_key_not_accepted`, so a leaked key can never move an app's address.
 
 ```php
-$result = $siren->webhooks->subscriptions->test($subscription['id']);
+$siren = new Siren(['accessToken' => $sessionToken]); // a signed-in admin's token
+
+$result = $siren->webhooks->subscriptions->test($subscriptionId);
 
 if (!$result['delivered']) {
-    $latest = $siren->webhooks->subscriptions->deliveries($subscription['id'])[0] ?? null;
+    $latest = $siren->webhooks->subscriptions->deliveries($subscriptionId)[0] ?? null;
     error_log(sprintf('%s %s', $latest['httpStatusCode'] ?? '-', $latest['responseBody'] ?? ''));
 }
 
 // Stop deliveries while you fix the endpoint, then start them again.
-$siren->webhooks->subscriptions->update($subscription['id'], ['status' => WebhookSubscriptionStatus::PAUSED]);
-$siren->webhooks->subscriptions->update($subscription['id'], ['status' => WebhookSubscriptionStatus::ACTIVE]);
+$siren->webhooks->subscriptions->update($subscriptionId, ['status' => WebhookSubscriptionStatus::PAUSED]);
+$siren->webhooks->subscriptions->update($subscriptionId, ['status' => WebhookSubscriptionStatus::ACTIVE]);
 ```
 
 Siren refuses a test for a paused subscription with a 409, raised as
@@ -1334,27 +1331,21 @@ subscription and 60 in all, and answers more with a 429, raised as
 | `events` | An API key holding the event's scope (`event:*`, or `event:{slug}`). A connected site's token sends only the events its integrations forward and `site-visited`. A custom event takes only its app's short-lived token, which the SDK gets from the app's key. See [Send an app's custom event](#send-an-apps-custom-event). |
 | `conversions`, `transactions`, `obligations` and `payouts`: `list()`, and `retrieve()` where the SDK has it | An API key holding the matching ledger scope, such as `ledger:conversions:read`. A dashboard session's access token, or a connected site's token, also works. |
 | `fulfillments`: `list()` and `retrieve()` | An API key holding `ledger:fulfillments:read` (`ApiKeyRecordScope::FULFILLMENTS_READ`). A dashboard session's access token also works. |
-| `webhooks->subscriptions` | An API key holding `webhook-subscriptions:read` for `list()`, `events()`, `retrieve()` and `deliveries()`, or `webhook-subscriptions:manage` for every call. A dashboard session's access token also works. |
+| `webhooks->subscriptions` | A signed-in dashboard session's access token. Siren refuses an API key with 401 `api_key_not_accepted`. |
 | `apps->verifyRequest()` | None. It reads nothing over the network, and checks the request with the app's signing secret. |
 | `apps->requests->answer()` | The app's own API key. Owning the feature is what lets the key answer, so it needs no scope. |
-| `apiKeys` | A signed-in dashboard session's access token. No API key scope reaches them. |
 | Other record resources, and the writes on `conversions` and `transactions` | A dashboard session's access token, or a connected site's token on the routes Siren Cloud opens to connectors. See [Connected sites](#connected-sites). |
 
-`ApiKeyScope` names every scope a new key may hold:
+An API key is part of an app. Siren Cloud has no `/api-keys` routes, and
+answers them with 404. A key is made, given scopes, rotated and revoked
+through the app, with a signed-in session: name the scopes in the app file
+and run `siren apps apply`, or edit the app in Siren Cloud. `siren apps
+rotate-key` gives the app a new key. A PHP project runs both with `npx
+@novatorius/siren`. Siren refuses an API key on every `/apps` route with 401
+`api_key_not_accepted`, so a leaked key can never make, change or revoke
+keys.
 
-```php
-use Siren\Sdk\ApiKeyScope;
-
-$key = $siren->apiKeys->create([
-    'label'  => 'Accounting export',
-    'scopes' => [
-        ApiKeyScope::ALL_EVENTS,
-        ApiKeyScope::LEDGER_CONVERSIONS_READ,
-        ApiKeyScope::LEDGER_PAYOUTS_READ,
-        ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE,
-    ],
-]);
-```
+`ApiKeyScope` and `ApiKeyRecordScope` name the scopes a key may hold:
 
 | Scope | What the key can do |
 |-------|---------------------|
@@ -1363,37 +1354,24 @@ $key = $siren->apiKeys->create([
 | `ApiKeyScope::LEDGER_TRANSACTIONS_READ` | `transactions->list()`, `transactions->retrieve()` |
 | `ApiKeyScope::LEDGER_OBLIGATIONS_READ` | `obligations->list()` |
 | `ApiKeyScope::LEDGER_PAYOUTS_READ` | `payouts->list()`, `payouts->retrieve()` |
-| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ` | `webhooks->subscriptions->list()`, `events()`, `retrieve()`, `deliveries()` |
-| `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE` | Every `webhooks->subscriptions` call, `update()` and `test()` included |
 
-`ApiKeyRecordScope` names all thirty record scopes Siren issues, in the order
-the dashboard offers them, and `ApiKeyRecordScope::ALL` lists them. Each
-constant has the name Siren's own `ApiKeyRecordScopes` gives it, so
-`ApiKeyRecordScope::FULFILLMENTS_READ` is `ledger:fulfillments:read`. The six
-ledger and webhook scopes above carry the same strings under both classes.
+The two webhook scopes are retired. A key that still holds one keeps the
+string, and it opens nothing.
+
+`ApiKeyRecordScope` names the record scopes Siren issues, in the order the
+dashboard offers them, and `ApiKeyRecordScope::ALL` lists them. Each constant
+has the name Siren's own `ApiKeyRecordScopes` gives it, so
+`ApiKeyRecordScope::FULFILLMENTS_READ` is `ledger:fulfillments:read`. The
+ledger scopes above carry the same strings under both classes.
 
 | Group | `ApiKeyRecordScope` constants |
 |-------|-------------------------------|
 | The ledger, read only | `ENGAGEMENTS_READ`, `OPPORTUNITIES_READ`, `CONVERSIONS_READ`, `TRANSACTIONS_READ`, `OBLIGATIONS_READ`, `FULFILLMENTS_READ`, `PAYOUTS_READ` |
-| Webhook subscriptions | `WEBHOOKS_READ`, `WEBHOOKS_MANAGE` |
 | Records a merchant sets up | `PRODUCTS_READ`, `PRODUCTS_MANAGE`, `COUPONS_READ`, `COUPONS_MANAGE`, `COLLABORATORS_READ`, `COLLABORATORS_MANAGE`, `COLLABORATOR_GROUPS_READ`, `COLLABORATOR_GROUPS_MANAGE`, `PROGRAMS_READ`, `PROGRAMS_MANAGE`, `PROGRAM_GROUPS_READ`, `PROGRAM_GROUPS_MANAGE`, `DISTRIBUTORS_READ`, `DISTRIBUTORS_MANAGE`, `APPLICATION_FORMS_READ`, `APPLICATION_FORMS_MANAGE`, `APPLICATIONS_READ`, `APPLICATIONS_MANAGE`, `NOTIFICATION_RULES_READ`, `NOTIFICATION_RULES_MANAGE`, `PROPERTIES_READ` |
 
 A manage scope reads everything its read scope reads.
 
-```php
-use Siren\Sdk\ApiKeyRecordScope;
-
-$key = $siren->apiKeys->create([
-    'label'  => 'Payout app',
-    'scopes' => [
-        ApiKeyRecordScope::PAYOUTS_READ,
-        ApiKeyRecordScope::FULFILLMENTS_READ,
-        ApiKeyRecordScope::WEBHOOKS_MANAGE,
-    ],
-]);
-```
-
-Siren grants the ledger, webhook and record scopes only by their exact names.
+Siren grants the ledger and record scopes only by their exact names.
 `*`, `event:*`, wildcards such as `ledger:*`, and older names such as
 `conversions:read` grant none of them, so a key made before these scopes
 existed reads nothing until you replace it with one that holds them. A key's
@@ -1401,8 +1379,7 @@ requests count against the organization's API rate limit.
 
 A key created with a `propertyId` is bound to that store. It reads only its
 own store's conversions, transactions and obligations, and Siren refuses it on
-payouts, fulfillments and webhook subscriptions with
-`StoreKeyNotAllowedException`. An
+payouts and fulfillments with `StoreKeyNotAllowedException`. An
 organization-wide key reads the whole organization, and narrows a ledger read
 to one store with the `propertyId` filter:
 
@@ -1811,10 +1788,10 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `payouts->retrieve($id, $params)` | `payouts.retrieve(id, params)` | `GET /payouts/{id}` | `ledger:payouts:read` |
 | `fulfillments->list($params)` | `fulfillments.list(params)` | `GET /fulfillments` | `ledger:fulfillments:read` |
 | `fulfillments->retrieve($id, $params)` | `fulfillments.retrieve(id, params)` | `GET /fulfillments/{id}` | `ledger:fulfillments:read` |
-| `webhooks->subscriptions->retrieve($id)` | `webhooks.subscriptions.retrieve(id)` | `GET /webhooks/{id}` | `webhook-subscriptions:read` or `:manage` |
-| `webhooks->subscriptions->update($id, $params)` | `webhooks.subscriptions.update(id, params)` | `PUT /webhooks/{id}` | `webhook-subscriptions:manage` |
-| `webhooks->subscriptions->test($id)` | `webhooks.subscriptions.test(id)` | `POST /webhooks/{id}/test` | `webhook-subscriptions:manage` |
-| `webhooks->subscriptions->deliveries($id)` | `webhooks.subscriptions.deliveries(id)` | `GET /webhooks/{id}/deliveries` | `webhook-subscriptions:read` or `:manage` |
+| `webhooks->subscriptions->retrieve($id)` | `webhooks.subscriptions.retrieve(id)` | `GET /webhooks/{id}` | none, a session only |
+| `webhooks->subscriptions->update($id, $params)` | `webhooks.subscriptions.update(id, params)` | `PUT /webhooks/{id}` | none, a session only |
+| `webhooks->subscriptions->test($id)` | `webhooks.subscriptions.test(id)` | `POST /webhooks/{id}/test` | none, a session only |
+| `webhooks->subscriptions->deliveries($id)` | `webhooks.subscriptions.deliveries(id)` | `GET /webhooks/{id}/deliveries` | none, a session only |
 | `ApiKeyRecordScope`, `ApiKeyRecordScope::ALL` | `ApiKeyRecordScope`, `API_KEY_RECORD_SCOPES` | none | none |
 | `events->ingest($slug, $payload)` | `siren.events.ingest(slug, payload)` | `POST /oauth/token`, then `POST /event/{slug}` | the app's key, traded for a token |
 | `events->browserToken($eventKey)` | `siren.events.browserToken(eventKey)` | `POST /oauth/token` with `scope=browser:{eventKey}` | the app's key |
