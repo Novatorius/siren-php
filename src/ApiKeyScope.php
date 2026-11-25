@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace Siren\Sdk;
 
 /**
- * The scopes an API key may be given (`apiKeys->create()`).
+ * The scopes an app's API key may be given, in the app file that
+ * `siren apps apply` reads or with `apps->createKey()`.
  *
  * A key sends events with event scopes: {@see ALL_EVENTS}, or
  * {@see event()} for one event type. The events a connected site forwards,
@@ -13,34 +14,28 @@ namespace Siren\Sdk;
  * no wildcard reaches them. {@see FULL_ACCESS} is still accepted, and grants
  * what {@see ALL_EVENTS} grants.
  *
- * A key also reads the ledger and manages webhook subscriptions with the
- * ledger and webhook scopes below:
+ * A key also reads the ledger with the ledger scopes below.
+ * {@see LEDGER_CONVERSIONS_READ}, {@see LEDGER_TRANSACTIONS_READ},
+ * {@see LEDGER_OBLIGATIONS_READ} and {@see LEDGER_PAYOUTS_READ} open
+ * `list()` and the read by id on `conversions`, `transactions`,
+ * `obligations` and `payouts`.
  *
- * - {@see LEDGER_CONVERSIONS_READ}, {@see LEDGER_TRANSACTIONS_READ},
- *   {@see LEDGER_OBLIGATIONS_READ} and {@see LEDGER_PAYOUTS_READ} open
- *   `list()` and the read by id on `conversions`, `transactions`,
- *   `obligations` and `payouts`.
- * - {@see WEBHOOK_SUBSCRIPTIONS_READ} lists subscriptions, reads one, and
- *   reads the event catalog and a subscription's deliveries.
- * - {@see WEBHOOK_SUBSCRIPTIONS_MANAGE} does all of that, and creates,
- *   changes and deletes subscriptions and sends a test delivery.
- *
- * Siren grants each of these six only by its exact name. {@see FULL_ACCESS},
+ * Siren grants each of these four only by its exact name. {@see FULL_ACCESS},
  * {@see ALL_EVENTS}, wildcards such as `ledger:*`, and the older names such
  * as `conversions:read` grant none of them. Siren refuses those older names
  * on a new key with a 400.
  *
- * No scope reaches API key management. `apiKeys` takes a signed-in
- * dashboard session.
+ * No scope reaches API key management or webhook subscriptions. Those take
+ * a signed-in dashboard session.
  *
- * `apiKeys->scopes()` returns the scopes the organization offers.
+ * `apps->scopes()` returns the scopes an app's key may hold.
  */
 final class ApiKeyScope
 {
     /** Every event type the key may send. */
     public const ALL_EVENTS = 'event:*';
 
-    /** The full wildcard. Siren treats it as {@see ALL_EVENTS}, and it opens no ledger or webhook route. */
+    /** The full wildcard. Siren treats it as {@see ALL_EVENTS}, and it opens no ledger route. */
     public const FULL_ACCESS = '*';
 
     public const SALE = 'event:' . EventSlug::SALE;
@@ -61,19 +56,6 @@ final class ApiKeyScope
      * are not kept by store, so a key bound to one store is refused here.
      */
     public const LEDGER_PAYOUTS_READ = 'ledger:payouts:read';
-
-    /**
-     * Lists webhook subscriptions, reads one, and reads the event catalog and
-     * a subscription's deliveries. A key bound to one store is refused here.
-     */
-    public const WEBHOOK_SUBSCRIPTIONS_READ = 'webhook-subscriptions:read';
-
-    /**
-     * Everything {@see WEBHOOK_SUBSCRIPTIONS_READ} opens, plus creating,
-     * changing and deleting subscriptions and sending a test delivery
-     * (`POST /webhooks/{id}/test`).
-     */
-    public const WEBHOOK_SUBSCRIPTIONS_MANAGE = 'webhook-subscriptions:manage';
 
     /**
      * The four ledger read scopes.

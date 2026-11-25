@@ -30,16 +30,14 @@ final class BackwardCompatibilityTest extends TestCase
         $siren = $this->mockSiren([
             self::jsonResponse(200, [], ['X-Siren-OID' => '1']),
             self::jsonResponse(200, []),
-            self::jsonResponse(201, ['id' => 3]),
             self::jsonResponse(200, ['items' => [], 'total' => 0, 'page' => 1, 'perPage' => 10, 'totalPages' => 1]),
         ]);
 
         $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1']);
-        $siren->apiKeys->list();
-        $siren->webhooks->subscriptions->create(['targetUrl' => 'https://example.test/hook', 'events' => ['*']]);
+        $siren->webhooks->subscriptions->list();
         $siren->collaborators->list();
 
-        $this->assertCount(4, $this->history);
+        $this->assertCount(3, $this->history);
 
         foreach ($this->history as $entry) {
             $this->assertSame('Bearer ' . self::API_KEY, $entry['request']->getHeaderLine('Authorization'));
@@ -51,7 +49,7 @@ final class BackwardCompatibilityTest extends TestCase
         $siren = $this->mockSiren([self::errorResponse(401, 'Invalid API key.'), self::jsonResponse(200, [])]);
 
         try {
-            $siren->apiKeys->list();
+            $siren->webhooks->subscriptions->list();
             $this->fail('Expected an AuthenticationException.');
         } catch (AuthenticationException $e) {
             $this->assertSame('Invalid API key.', $e->getMessage());

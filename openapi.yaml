@@ -68,8 +68,6 @@ tags:
     description: Ingest commerce and tracking events.
   - name: Webhooks
     description: Subscribe to program events; delivered as signed HTTP callbacks.
-  - name: API Keys
-    description: Manage API keys.
   - name: Reconciliation
     description: Read Siren's ledger to reconcile against your own records.
   - name: Collaborators
@@ -102,6 +100,8 @@ tags:
     description: The organization settings Siren shares with a connected site.
   - name: Collaborator Groups
     description: Named sets of collaborators that programs and distributors target.
+  - name: Apps
+    description: The routes a Siren app's own code calls with its key, to answer Siren's asks and to trade its key for a short-lived token.
 paths:
   /event/sale:
     post:
@@ -218,10 +218,16 @@ paths:
         such as `sale-triggered`, and those need their exact `event:{slug}`
         scope on an API key, because no wildcard reaches them. Most events
         answer with no body.
+
+        An app's custom event takes only a short-lived token of the owning
+        app, never its key: a server token or a browser token from
+        `POST /oauth/token`, sent as a bearer or, from a page, in the
+        `access_token` query parameter.
       security:
         - apiKey: []
         - connectorToken: []
         - dashboardSession: []
+        - appToken: []
       parameters:
         - name: eventSlug
           in: path
@@ -250,6 +256,468 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /apps/scopes:
+    get:
+      tags: [Apps]
+      operationId: listAppScopes
+      summary: List the scopes an app's key may hold
+      description: |
+        The scopes an app's key may hold, grouped by resource: `events`,
+        `ledger`, and each `records:` resource, such as `records:products`.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Each group's scopes, in the order the app form offers them.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { $ref: '#/components/schemas/ApiKeyScopeEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /apps/{key}/key:
+    post:
+      tags: [Apps]
+      operationId: createAppKey
+      summary: Give an app with no key a new one
+      description: |
+        Makes a key for an app that holds none, with the body's `scopes`, or
+        none when left out. Answers 201 with the app and `rawKey`, shown
+        this once. Siren answers 409 `app_key_exists` when the app holds an
+        active key, and 400 when the organization holds its cap of keys.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
+      security:
+        - dashboardSession: []
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scopes:
+                  type: array
+                  items: { type: string }
+                  example: ['event:*', 'ledger:conversions:read']
+      responses:
+        '201':
+          description: The app, with `rawKey`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppWithRawKey' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Apps]
+      operationId: revokeAppKey
+      summary: Revoke an app's key
+      description: |
+        Revokes the app's key and answers the app, which keeps its address.
+        Siren answers 409 `app_key_missing` for an app with no key. Takes a
+        signed-in dashboard session. Siren answers an API key with 401
+        `api_key_not_accepted`.
+      security:
+        - dashboardSession: []
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The app.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /apps/{key}/key/rotate:
+    post:
+      tags: [Apps]
+      operationId: rotateAppKey
+      summary: Replace an app's key
+      description: |
+        Replaces the app's key. The old key stops working at once, and the
+        signing secret stays. Answers the app with `rawKey`, shown this
+        once. Siren answers 409 `app_key_missing` for an app with no key.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
+      security:
+        - dashboardSession: []
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The app, with `rawKey`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppWithRawKey' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /apps/{app}/features:
+    post:
+      tags: [Apps]
+      operationId: createAppFeature
+      summary: Add a feature to an app
+      description: |
+        Adds one feature to the app, as the dashboard's "New feature" does,
+        and answers it with `uses` and `usedBy`. Siren answers 201, or 200
+        when an archived feature of the same kind and key came back with the
+        new fields. With no `key`, Siren makes one from the name.
+        `apps->features->create()` sends it once.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/AppKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppFeatureInput' }
+      responses:
+        '200':
+          description: An archived feature of the same kind and key came back.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppFeature' }
+        '201':
+          description: The feature was added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppFeature' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: The organization has no app with this key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`error.code` is `app_features_need_key_and_address`, with `error.data.missing`, when the app lacks a key or an address.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: A field Siren refuses, named in `error.data.field`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /apps/{app}/features/{id}:
+    parameters:
+      - $ref: '#/components/parameters/AppKey'
+      - name: id
+        in: path
+        required: true
+        description: The feature's id.
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Apps]
+      operationId: getAppFeature
+      summary: Read one feature
+      description: The feature with `uses`, how many records pick it, and `usedBy`, up to 100 of them. Siren answers 404 for a feature another app holds.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The feature.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppFeature' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`Feature not found.`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    patch:
+      tags: [Apps]
+      operationId: updateAppFeature
+      summary: Change a feature
+      description: Changes a feature's name, description or settings. A field left out keeps its value. Siren refuses a changed `kind` or `key` with 422.
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppFeatureInput' }
+      responses:
+        '200':
+          description: The feature as it now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppFeature' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`Feature not found.`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: A field Siren refuses, named in `error.data.field`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Apps]
+      operationId: deleteAppFeature
+      summary: Remove a feature
+      description: Archives the feature while a record picks it, and deletes it otherwise.
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: '`feature` is the archived feature, or null once it was deleted.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [archived, feature]
+                properties:
+                  archived: { type: boolean }
+                  feature:
+                    oneOf:
+                      - { $ref: '#/components/schemas/AppFeature' }
+                      - { type: 'null' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`Feature not found.`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /apps/requests:
+    get:
+      tags: [Apps]
+      operationId: listAppRequests
+      summary: List the requests Siren sent the organization's apps
+      description: The latest requests, newest first, at most 50. `apps->requests->list()` reads it.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, sent, delivered, answered, applied, needs_attention, dropped] }
+      responses:
+        '200':
+          description: The requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/AppRequestRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /apps/requests/{requestKey}:
+    get:
+      tags: [Apps]
+      operationId: getAppRequest
+      summary: Read one request Siren sent an app
+      description: The list's fields, the `data` Siren sent the app, the `answer` it took or null, and `answeredByUser`, the person who answered by hand, or null.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestKey'
+      responses:
+        '200':
+          description: The request.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/AppRequestRecord' }
+                  - type: object
+                    required: [data, answer, answeredByUser]
+                    properties:
+                      data: { type: object, additionalProperties: true }
+                      answer:
+                        oneOf:
+                          - { type: object, additionalProperties: true }
+                          - { type: 'null' }
+                      answeredByUser:
+                        oneOf:
+                          - type: object
+                            required: [id, email]
+                            properties:
+                              id: { type: integer }
+                              email: { type: string }
+                          - { type: 'null' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`error.code` is `app_request_not_found`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /apps/requests/{requestKey}/resend:
+    post:
+      tags: [Apps]
+      operationId: resendAppRequest
+      summary: Send a request again
+      description: |
+        Sends the request again under the same key, and gives an ask a new
+        answer window. A request that holds an answer Siren hasn't applied is
+        not sent again: Siren applies its stored answer instead.
+        `apps->requests->resend()` sends it once.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestKey'
+      responses:
+        '200':
+          description: The request as it now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppRequestRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`error.code` is `plan_required` when the organization''s plan does not send to the feature''s kind.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`error.code` is `app_request_not_found`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`error.code` is `app_request_not_resendable` for a request that is `applied`, a `delivered` tell, or one Siren would send while its app is off.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /apps/requests/{requestKey}/answer:
+    post:
+      tags: [Apps]
+      operationId: answerAppRequest
+      summary: Answer an ask
+      description: |
+        Takes an app's answer to an ask Siren sent it. The app sends its own
+        API key, which needs no scope and answers only a request Siren sent
+        its own app. A signed-in admin may answer by hand, but only a request
+        that needs attention. The body is the answer, a JSON object with a
+        text `outcome`, at most 16384 bytes. `AppRequests::answer()` sends it
+        once, and the request handler sends the same answer again after a
+        lost connection, a 429 or a 5xx.
+
+        Siren takes each answer once. The same answer again answers
+        `duplicate: true` and applies nothing. Each refusal carries its code
+        in `error.code`: 403 `app_inactive` or `app_answer_forbidden`, 404
+        `app_request_not_found`, which an organization key that is no app's
+        also gets, 409 `app_request_already_answered` for a different answer
+        after one was accepted, 409 `app_request_dropped` once Siren stopped
+        waiting because the work waited more than 24 hours, 409
+        `app_request_not_needing_attention` for a person's answer to an ask
+        that does not need attention, and 422 `app_answer_invalid` with the
+        reason. A missing or unknown bearer gets 401 from the key check every
+        route shares, with no code, and the SDK reads it as
+        `app_answer_unauthorized`.
+      security:
+        - apiKey: []
+        - dashboardSession: []
+      parameters:
+        - name: requestKey
+          in: path
+          required: true
+          description: The request's `id` from the envelope Siren sent.
+          schema: { type: string, pattern: '^apr_[0-9a-f]{32}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppAnswer' }
+      responses:
+        '200':
+          description: The answer was accepted, now or before.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppAnswerReceipt' }
+              examples:
+                accepted: { value: { status: accepted } }
+                duplicate: { value: { status: accepted, duplicate: true } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`error.code` is `app_inactive` or `app_answer_forbidden`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`error.code` is `app_request_not_found`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`error.code` is `app_request_already_answered`, `app_request_dropped` or `app_request_not_needing_attention`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`error.code` is `app_answer_invalid`, and `error.message` says why the answer does not fit the question.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /oauth/token:
+    post:
+      tags: [Apps]
+      operationId: requestAppToken
+      summary: Trade an app's key for a short-lived token
+      description: |
+        The `client_credentials` grant an app uses before it sends its own
+        custom events, which take a token, never the key. `client_secret` is
+        the app's key. `client_id`, when sent, must be the app's key word.
+        With no `scope` Siren answers a server token that lasts 1200 seconds.
+        With `scope: browser:{eventKey}` it answers a browser token for that
+        one custom event, lasting 600 seconds, and refuses it while the event
+        allows no domain. `Auth\AppTokens` keeps each token and asks again
+        when it is close to ending. The same route serves connected sites'
+        other grants, which this SDK does not send.
+
+        A refusal is a 400, 401 or 503 with the RFC 6749 error envelope,
+        `error` and `error_description`: 400 `invalid_request` without a
+        `client_secret`, 400 `unauthorized_client` for a key that is no
+        app's, 400 `invalid_scope` for another scope, an event the app does
+        not have or one that allows no domain, 400 `unsupported_grant_type`,
+        401 `invalid_client` for an unknown or revoked key, a deleted app or
+        another `client_id`, and 503 `temporarily_unavailable`. App grants
+        have their own rate limit, 600 an hour.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [grant_type, client_secret]
+              properties:
+                grant_type: { type: string, enum: [client_credentials] }
+                client_secret: { type: string, description: 'The app''s API key.' }
+                client_id: { type: string, description: 'The app''s key word, or left out.' }
+                scope: { type: string, description: 'Left out for a server token, or `browser:{eventKey}` for a browser token.' }
+      responses:
+        '200':
+          description: A short-lived token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in]
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, enum: [Bearer] }
+                  expires_in: { type: integer, description: '1200 for a server token, 600 for a browser token.' }
+                  scope: { type: string, description: 'The browser scope, on a browser token only.' }
+        '400': { $ref: '#/components/responses/OAuthRefused' }
+        '401': { $ref: '#/components/responses/OAuthRefused' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/OAuthRefused' }
   /ping:
     get:
       tags: [Events]
@@ -289,12 +757,9 @@ paths:
         200) and `offset`. An
         organization holds at most 100 subscriptions.
 
-        An API key needs `webhook-subscriptions:read` or
-        `webhook-subscriptions:manage`, and must be organization-wide. A key
-        bound to one store is refused with 403 `store_key_not_allowed`.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
       security:
-        - apiKey: ['webhook-subscriptions:read']
-        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/Number'
@@ -313,46 +778,6 @@ paths:
                 items: { $ref: '#/components/schemas/WebhookSubscription' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-    post:
-      tags: [Webhooks]
-      operationId: createWebhookSubscription
-      summary: Create a webhook subscription
-      description: |
-        Registers a URL to receive event callbacks. The response includes
-        `signingSecret`, returned **once** — store it to verify future
-        deliveries. Deliveries are signed with
-        `X-Siren-Signature: sha256=<hmac-sha256(rawBody, signingSecret)>`.
-        The body of each delivery is the event's payload. The `X-Siren-Event`
-        header names the event and `X-Siren-Delivery` carries the delivery id.
-        Siren answers 400 once the organization holds 100 subscriptions.
-
-        An API key needs `webhook-subscriptions:manage`, and must be
-        organization-wide. A key bound to one store is refused with 403
-        `store_key_not_allowed`.
-      security:
-        - apiKey: ['webhook-subscriptions:manage']
-        - dashboardSession: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/WebhookSubscriptionCreate' }
-      responses:
-        '201':
-          description: Subscription created.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/WebhookSubscription'
-                  - type: object
-                    properties:
-                      signingSecret:
-                        type: string
-                        description: HMAC signing secret. Returned once.
-        '400': { $ref: '#/components/responses/ValidationError' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
   /webhooks/events:
     get:
       tags: [Webhooks]
@@ -362,12 +787,9 @@ paths:
         The live catalog of events Siren delivers, in the order the dashboard
         shows them.
 
-        An API key needs `webhook-subscriptions:read` or
-        `webhook-subscriptions:manage`, and must be organization-wide. A key
-        bound to one store is refused with 403 `store_key_not_allowed`.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
       security:
-        - apiKey: ['webhook-subscriptions:read']
-        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       responses:
         '200':
@@ -385,12 +807,9 @@ paths:
       operationId: getWebhookSubscription
       summary: Get a webhook subscription
       description: |
-        An API key needs `webhook-subscriptions:read` or
-        `webhook-subscriptions:manage`, and must be organization-wide. A key
-        bound to one store is refused with 403 `store_key_not_allowed`.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
       security:
-        - apiKey: ['webhook-subscriptions:read']
-        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -403,16 +822,47 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Webhooks]
+      operationId: updateWebhookSubscription
+      summary: Update a webhook subscription
+      description: |
+        Changes the fields sent and leaves the rest as they are. Siren reads
+        only `targetUrl`, `events`, `status` and `description`, and skips a
+        `null` one. `status: paused` stops deliveries and `active` starts
+        them again. Siren answers 400 for a target URL that is not a public
+        https endpoint. Send at least one field that is not `null`. With
+        none, Siren has nothing to change and answers 500.
+
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
+      security:
+        - dashboardSession: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WebhookSubscriptionUpdate' }
+      responses:
+        '200':
+          description: The subscription as it now stands (bare object).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookSubscription' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
     delete:
       tags: [Webhooks]
       operationId: deleteWebhookSubscription
       summary: Delete a webhook subscription
       description: |
-        An API key needs `webhook-subscriptions:manage`, and must be
-        organization-wide. A key bound to one store is refused with 403
-        `store_key_not_allowed`.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
       security:
-        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -434,12 +884,9 @@ paths:
         paused one. Each test makes Siren send a request, so the number of
         tests per hour is limited, and Siren answers 429 past it.
 
-        An API key needs `webhook-subscriptions:manage`, and must be
-        organization-wide. A key that holds only `webhook-subscriptions:read`
-        is refused with 403 `missing_scope`, and a key bound to one store
-        with 403 `store_key_not_allowed`.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
       security:
-        - apiKey: ['webhook-subscriptions:manage']
         - dashboardSession: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -468,124 +915,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
-  /api-keys:
+  /webhooks/{id}/deliveries:
     get:
-      tags: [API Keys]
-      operationId: listApiKeys
-      summary: List API keys
+      tags: [Webhooks]
+      operationId: listWebhookDeliveries
+      summary: List a subscription's deliveries
       description: |
-        Pages with `number` (default 200, and a size above 200 is lowered to
-        200) and `offset`.
+        The subscription's latest deliveries, at most 50, newest first, as a
+        bare array, which is empty when there are none. Each holds the payload
+        Siren sent, its status, how many tries it took and the first 200 bytes
+        of the endpoint's answer.
 
-        Takes a signed-in dashboard session. No API key scope reaches this
-        route, and Siren answers an API key with 401 `api_key_not_accepted`.
-      security:
-        - dashboardSession: []
-      parameters:
-        - $ref: '#/components/parameters/Number'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: API keys (bare array, without raw key material).
-          headers:
-            x-siren-estimated-count:
-              schema: { type: integer }
-              description: Total number of keys.
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/ApiKey' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-    post:
-      tags: [API Keys]
-      operationId: createApiKey
-      summary: Create an API key
-      description: |
-        Creates a new API key. The plaintext `rawKey` (`sk_live_...`) is
-        returned **once** and cannot be retrieved later. A key holds event
-        scopes, to send events, and the ledger and webhook scopes, to read
-        conversions, transactions, obligations and payouts and to manage
-        webhook subscriptions. Siren answers 400 for a missing or empty
-        `scopes`, for an older resource scope such as `programs:read` or
-        `conversions:read`, and once the organization holds 250 active keys.
-
-        Takes a signed-in dashboard session. No API key scope reaches this
-        route, and Siren answers an API key with 401 `api_key_not_accepted`.
-      security:
-        - dashboardSession: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ApiKeyCreate' }
-      responses:
-        '201':
-          description: API key created.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiKey'
-                  - type: object
-                    properties:
-                      rawKey:
-                        type: string
-                        description: Plaintext key. Returned once.
-        '400': { $ref: '#/components/responses/ValidationError' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-  /api-keys/scopes:
-    get:
-      tags: [API Keys]
-      operationId: listApiKeyScopes
-      summary: List the scopes a new key may hold
-      description: |
-        Takes a signed-in dashboard session. No API key scope reaches this
-        route, and Siren answers an API key with 401 `api_key_not_accepted`.
-      security:
-        - dashboardSession: []
-      responses:
-        '200':
-          description: |
-            The scopes a new key may hold: the event scopes under `events`,
-            the ledger read scopes under `ledger`, and the webhook scopes
-            under `webhook-subscriptions`.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  events:
-                    type: array
-                    items: { $ref: '#/components/schemas/ApiKeyScopeEntry' }
-                  ledger:
-                    type: array
-                    items: { $ref: '#/components/schemas/ApiKeyScopeEntry' }
-                  webhook-subscriptions:
-                    type: array
-                    items: { $ref: '#/components/schemas/ApiKeyScopeEntry' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-  /api-keys/{id}:
-    delete:
-      tags: [API Keys]
-      operationId: revokeApiKey
-      summary: Revoke an API key
-      description: |
-        Takes a signed-in dashboard session. No API key scope reaches this
-        route, and Siren answers an API key with 401 `api_key_not_accepted`.
+        Takes a signed-in dashboard session. Siren answers an API key with
+        401 `api_key_not_accepted`.
       security:
         - dashboardSession: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         '200':
-          description: Revoked. The body is the revoked key.
+          description: The deliveries, newest first.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ApiKey' }
+              schema:
+                type: array
+                maxItems: 50
+                items: { $ref: '#/components/schemas/WebhookDelivery' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /collaborators:
     get:
@@ -2478,6 +2835,138 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /payouts/{id}:
+    get:
+      tags: [Reconciliation]
+      operationId: retrievePayout
+      summary: Retrieve one payout
+      description: |
+        Reads one payout by id. An API key needs the `ledger:payouts:read`
+        scope, and must be organization-wide. Payouts are not kept by store,
+        so a key bound to one store is refused with 403
+        `store_key_not_allowed`.
+
+        Siren answers with its thirteen default fields (`id`, `status`,
+        `value`, `currency`, `collaboratorId`, `fulfillmentId`, `datePaid`,
+        `dateCreated`, `dateModified`, `failureReason`, `dateFailed`,
+        `waitingReason` and `dateWaiting`) unless `fields` names others.
+        `include=extended` adds `collaboratorName` and `collaboratorEmail`.
+        `value` is a whole number in the currency's smallest unit.
+      security:
+        - apiKey: ['ledger:payouts:read']
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The payout's id, a positive whole number.
+          schema: { type: integer, minimum: 1 }
+        - { $ref: '#/components/parameters/Fields' }
+        - name: include
+          in: query
+          description: |
+            `extended` adds the collaborator's name and email.
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /fulfillments:
+    get:
+      tags: [Reconciliation]
+      operationId: listFulfillments
+      summary: List fulfillments
+      description: |
+        Lists the batches Siren groups payouts into. An API key needs the
+        `ledger:fulfillments:read` scope, and must be organization-wide.
+        Fulfillments are not kept by store, so a key bound to one store is
+        refused with 403 `store_key_not_allowed`.
+
+        Siren answers `id`, `status`, `dateCreated` and `dateModified` unless
+        `fields` names others. `include=extended` adds the payout counts,
+        `totalValue` and `currency`. `payoutStatus`, `currency`, `from` and
+        `to` keep the fulfillments that hold at least one matching payout.
+        Siren reads an empty `payoutStatus` or `currency`, and a `from` or
+        `to` that is not a real day, as no filter.
+      security:
+        - apiKey: ['ledger:fulfillments:read']
+        - dashboardSession: []
+      parameters:
+        - { $ref: '#/components/parameters/Number' }
+        - { $ref: '#/components/parameters/Offset' }
+        - { $ref: '#/components/parameters/Fields' }
+        - { $ref: '#/components/parameters/Order' }
+        - name: orderBy
+          in: query
+          schema: { type: string, enum: [id, status, dateCreated] }
+        - name: status
+          in: query
+          description: The fulfillment's status. A comma-separated list means "any of".
+          schema: { type: string }
+        - name: payoutStatus
+          in: query
+          description: |
+            Only fulfillments holding a payout in this status. `waiting` means
+            an unpaid payout held for its collaborator's payout setup.
+          schema: { type: string, enum: [paid, unpaid, processing, failed, waiting] }
+        - name: currency
+          in: query
+          description: Only fulfillments holding a payout in this currency.
+          schema: { type: string }
+        - name: from
+          in: query
+          description: |
+            The first day to include, `YYYY-MM-DD`. With no `payoutStatus` it
+            is the day a payout was paid, and with one the day it was made.
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          description: The last day to include, `YYYY-MM-DD`.
+          schema: { type: string, format: date }
+        - name: include
+          in: query
+          description: |
+            `extended` adds the payout counts, the total and the currency.
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/PaginatedList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /fulfillments/{id}:
+    get:
+      tags: [Reconciliation]
+      operationId: retrieveFulfillment
+      summary: Retrieve one fulfillment
+      description: |
+        Reads one fulfillment by id. An API key needs the
+        `ledger:fulfillments:read` scope, and must be organization-wide.
+
+        Siren answers `id`, `status`, `dateCreated` and `dateModified` unless
+        `fields` names others. `include=extended` adds the payout counts,
+        `totalValue`, `currency` and `payouts`, each payout with its dates as
+        `Y-m-d H:i:s`.
+      security:
+        - apiKey: ['ledger:fulfillments:read']
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The fulfillment's id, a positive whole number.
+          schema: { type: integer, minimum: 1 }
+        - { $ref: '#/components/parameters/Fields' }
+        - name: include
+          in: query
+          description: |
+            `extended` adds the payout counts, the total, the currency and each payout.
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Record' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     apiKey:
@@ -2485,13 +2974,12 @@ components:
       scheme: bearer
       bearerFormat: sk_live_...
       description: |
-        An API key minted in the Siren dashboard or via createApiKey. Event
-        scopes send events. The ledger scopes read conversions, transactions,
-        obligations and payouts, and the webhook scopes read and manage
-        webhook subscriptions. Each operation lists the scopes that open it,
-        and holding any one listed requirement is enough. Every other route
-        answers an API key with 401 `api_key_not_accepted`, the API key
-        routes included. A key's requests count against the organization's
+        An app's API key, made with the app in Siren Cloud or by
+        `siren apps apply`. Event scopes send events. The ledger scopes read
+        conversions, transactions, obligations, fulfillments and payouts.
+        Each operation lists the scopes that open it, and holding any one
+        listed requirement is enough. Every other route answers an API key
+        with 401 `api_key_not_accepted`, the app and key routes included. A key's requests count against the organization's
         API rate limit.
     dashboardSession:
       type: http
@@ -2501,6 +2989,15 @@ components:
         The access token of a person signed in to the Siren dashboard. Some
         routes need the admin role, and refuse other roles with a 403 whose
         code is `admin_required`.
+    appToken:
+      type: http
+      scheme: bearer
+      description: |
+        A short-lived token of a Siren app, from `POST /oauth/token`. A
+        server token lasts 1200 seconds and sends the app's custom events. A
+        browser token lasts 600 seconds, sends one custom event, and is taken
+        only from a page on the event's allowed domains, often as the
+        `access_token` query parameter.
     connectorToken:
       type: http
       scheme: bearer
@@ -2519,6 +3016,18 @@ components:
       description: The opportunity (tracking) id associated with the event, a whole number.
       schema: { type: integer }
   parameters:
+    AppKey:
+      name: app
+      in: path
+      required: true
+      description: The app's key, lowercase letters and digits joined by single dashes, at most 64 characters, and never requests, events, scopes or kinds.
+      schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 64 }
+    RequestKey:
+      name: requestKey
+      in: path
+      required: true
+      description: The request's `id`, `apr_` and 32 lowercase hex characters.
+      schema: { type: string, pattern: '^apr_[0-9a-f]{32}$' }
     Number:
       name: number
       in: query
@@ -2566,6 +3075,59 @@ components:
       description: The same one-store filter as `propertyId`, sent as a header.
       schema: { type: integer, minimum: 1 }
   schemas:
+    AppFeatureInput:
+      type: object
+      description: A feature's fields. `kind` and `name` are needed to add one, and `kind` and `key` never change once Siren makes it.
+      properties:
+        kind: { type: string, description: 'One of the kinds `GET /apps/kinds` lists, such as `payoutMethod`.' }
+        key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        currencies: { type: array, items: { type: string } }
+        answerWindowMinutes: { type: integer, minimum: 1, maximum: 43200 }
+        scoresMoney: { type: boolean }
+        conversionTypes: { type: array, items: { type: string } }
+        fields: { type: array, items: { type: object, additionalProperties: true } }
+        domains: { type: array, items: { type: string } }
+      additionalProperties: false
+    AppFeature:
+      type: object
+      required: [id, kind, key, name]
+      properties:
+        id: { type: integer }
+        ref: { type: string, description: '`app:{id}`.' }
+        appId: { type: integer }
+        kind: { type: string }
+        key: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        settings: { type: object, additionalProperties: true }
+        status: { type: string }
+        uses: { type: integer }
+        usedBy: { type: array, items: { type: object, additionalProperties: true } }
+      additionalProperties: true
+    AppRequestRecord:
+      type: object
+      required: [id, appId, feature, kind, mode, status]
+      properties:
+        id: { type: string, pattern: '^apr_[0-9a-f]{32}$' }
+        appId: { type: integer }
+        feature: { type: string, description: '`app:{id}` of the feature Siren acted for.' }
+        kind: { type: string }
+        mode: { type: string, enum: [tell, ask] }
+        subject:
+          type: object
+          properties:
+            type: { type: string }
+            id: { type: string }
+        status: { type: string, enum: [pending, sent, delivered, answered, applied, needs_attention, dropped] }
+        sendCount: { type: integer }
+        answerBy: { type: [string, 'null'], format: date-time }
+        answeredBy: { type: [string, 'null'], description: '`app:{appId}` or `user:{userId}`.' }
+        answeredAt: { type: [string, 'null'], format: date-time }
+        lastError: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+      additionalProperties: true
     Record:
       type: object
       description: |
@@ -2787,16 +3349,35 @@ components:
         oauthClientId: { type: [string, 'null'] }
         dateCreated: { type: [string, 'null'], format: date-time }
         dateModified: { type: [string, 'null'], format: date-time }
-    WebhookSubscriptionCreate:
+    WebhookSubscriptionUpdate:
       type: object
-      required: [targetUrl, events]
+      description: The fields to change. Siren reads only these four. Send at least one.
+      minProperties: 1
       properties:
-        targetUrl: { type: string, format: uri, example: https://example.com/webhooks/siren }
+        targetUrl: { type: string, format: uri }
         events:
           type: array
           items: { $ref: '#/components/schemas/WebhookEventType' }
-          example: ['conversion.approved', 'payout.paid']
+        status: { type: string, enum: [active, paused] }
         description: { type: string }
+    WebhookDelivery:
+      type: object
+      description: One delivery to an organization's subscription. Dates are `Y-m-d H:i:s` in UTC with no offset.
+      properties:
+        id: { type: integer }
+        webhookSubscriptionId: { type: integer }
+        eventType: { type: string }
+        eventId: { type: string, description: The `X-Siren-Delivery` value the endpoint received. }
+        payload: { type: object, additionalProperties: true }
+        status: { type: string, enum: [pending, delivered, failed] }
+        attemptCount: { type: integer }
+        httpStatusCode: { type: [integer, 'null'] }
+        responseBody: { type: [string, 'null'], description: The first 200 bytes of the endpoint's answer. }
+        errorMessage: { type: [string, 'null'] }
+        nextRetryAt: { type: [string, 'null'] }
+        deliveredAt: { type: [string, 'null'] }
+        dateCreated: { type: [string, 'null'] }
+        dateModified: { type: [string, 'null'] }
     WebhookEventType:
       type: string
       description: A subscribable event type. Use `*` to subscribe to all.
@@ -2836,57 +3417,14 @@ components:
         - sale.created
         - transaction.completed
         - transaction.created
-    ApiKey:
+    AppWithRawKey:
       type: object
+      description: The app as Siren answers it, with `rawKey`, the new key, shown this once.
+      required: [key, rawKey]
       properties:
-        id: { type: integer }
-        keyPrefix: { type: string, example: sk_live_a1b2c3d4 }
-        label: { type: string }
-        status: { type: string, example: active }
-        propertyId: { type: [integer, 'null'] }
-        scopes:
-          type: array
-          items: { type: string }
-        expiresAt: { type: [string, 'null'], format: date-time }
-        lastUsedAt: { type: [string, 'null'], format: date-time }
-        revokedAt: { type: [string, 'null'], format: date-time }
-        dateCreated: { type: [string, 'null'], format: date-time }
-        dateModified: { type: [string, 'null'], format: date-time }
-    ApiKeyCreate:
-      type: object
-      required: [scopes]
-      properties:
-        label: { type: string, example: Production server }
-        scopes:
-          type: array
-          minItems: 1
-          items: { type: string }
-          example: ['event:*', 'ledger:conversions:read']
-          description: |
-            Event scopes: `event:*` for every event, or `event:{slug}` for one
-            event type. `*` is also accepted and grants what `event:*` grants.
-
-            Ledger and webhook scopes: `ledger:conversions:read`,
-            `ledger:transactions:read`, `ledger:obligations:read`,
-            `ledger:payouts:read`, `webhook-subscriptions:read` and
-            `webhook-subscriptions:manage`. Each is granted only by its exact
-            name. `*`, `event:*` and wildcards such as `ledger:*` grant none
-            of them.
-
-            An older resource scope such as `programs:read` or
-            `conversions:read` is refused with 400.
-        expiresAt:
-          type: string
-          format: date-time
-          description: When the key stops working. Must be in the future.
-        propertyId:
-          type: integer
-          minimum: 1
-          description: |
-            Binds the key to this Property of the organization. Siren stamps
-            it on the key's events, the key reads only that store's
-            conversions, transactions and obligations, and it is refused on
-            payouts and webhook subscriptions with 403 `store_key_not_allowed`.
+        key: { type: string, example: acme-crm }
+        rawKey: { type: string, description: The new key. Returned once. }
+      additionalProperties: true
     ApiKeyScopeEntry:
       type: object
       properties:
@@ -2894,6 +3432,22 @@ components:
         resource: { type: string, example: ledger }
         action: { type: string, example: 'conversions:read' }
         label: { type: string, example: Read conversions }
+    AppAnswer:
+      type: object
+      description: |
+        An answer to an ask, at most 16384 bytes of JSON. Its shape depends on
+        the feature's kind, as `FeatureKind` types it, and every answer
+        carries a text `outcome`.
+      required: [outcome]
+      properties:
+        outcome: { type: string }
+      additionalProperties: true
+    AppAnswerReceipt:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [accepted] }
+        duplicate: { type: boolean, description: 'True when Siren had already taken this same answer.' }
     Error:
       type: object
       description: |
@@ -2962,6 +3516,16 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    OAuthRefused:
+      description: 'The RFC 6749 error envelope: `error` is the code and `error_description` says why.'
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error: { type: string }
+              error_description: { type: string }
     Unauthorized:
       description: |
         Missing, invalid, expired or revoked credential. A valid API key sent

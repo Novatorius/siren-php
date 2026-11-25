@@ -58,7 +58,7 @@ class MissingScopeException extends PermissionException
 
     /**
      * Every scope that opens the route, from `error.context.anyOf`, such as
-     * `['webhook-subscriptions:read', 'webhook-subscriptions:manage']`. Siren
+     * `['ledger:conversions:read']`. Siren
      * sends it when it refuses an API key. Holding any one of them is
      * enough. Empty when Siren did not list them.
      *

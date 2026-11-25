@@ -24,7 +24,7 @@ final class Webhooks
     /** The header that carries the delivery id, the same on every retry of one delivery. */
     public const DELIVERY_HEADER = 'X-Siren-Delivery';
 
-    /** Manage webhook subscriptions: `create`, `list`, `delete`. */
+    /** Manage webhook subscriptions: `create`, `list`, `events`, `retrieve`, `update`, `test`, `deliveries`, `delete`. */
     public readonly WebhookSubscriptions $subscriptions;
 
     public function __construct(HttpTransport $transport)
@@ -40,7 +40,7 @@ final class Webhooks
      * HMAC will not match. `$signatureHeader` is the value of the
      * `X-Siren-Signature` header (`sha256=<hex>`).
      *
-     * A subscription made with `subscriptions->create()` receives the event
+     * An app's address receives the event
      * payload itself as the body, and Siren names the event in the
      * `X-Siren-Event` header and the delivery in `X-Siren-Delivery`. Pass
      * those two headers as `$eventType` and `$deliveryId`, or use
@@ -90,6 +90,36 @@ final class Webhooks
         $eventType = self::nonEmpty($eventType);
         $deliveryId = self::nonEmpty($deliveryId);
 
+        // A flat body never names its event. Without the X-Siren-Event header
+        // there is nothing to dispatch on, so refuse the delivery loudly
+        // instead of returning an event with an empty type that matches no
+        // handler. Code written for 0.2.0 passes no headers.
+        if ($eventType === null && !self::isEnvelope($decoded, $eventType, $deliveryId)) {
+            throw new SignatureVerificationException(
+                'Siren names this delivery\'s event in the X-Siren-Event header, and the body does not '
+                . 'carry it. Pass that header as $eventType, or call constructEventFromHeaders().',
+            );
+        }
+
+        return self::eventFrom($decoded, $eventType, $deliveryId);
+    }
+
+    /**
+     * The event in a decoded, verified body: the envelope's own `type`,
+     * `data` and `id` when the body is a connected site's envelope, and
+     * otherwise the body itself as the data of `$eventType`.
+     *
+     * @internal Shared with {@see \Siren\Sdk\AppRequestHandler}, which
+     *     verifies a delivery by its V2 signature first.
+     *
+     * @param array<int|string, mixed> $decoded
+     * @param string|null $eventType The `X-Siren-Event` header. Needed for a body that is not an envelope.
+     */
+    public static function eventFrom(array $decoded, ?string $eventType, ?string $deliveryId): WebhookEvent
+    {
+        $eventType = self::nonEmpty($eventType);
+        $deliveryId = self::nonEmpty($deliveryId);
+
         if (self::isEnvelope($decoded, $eventType, $deliveryId)) {
             return new WebhookEvent(
                 type: $decoded['type'],
@@ -99,19 +129,9 @@ final class Webhooks
             );
         }
 
-        // A flat body never names its event. Without the X-Siren-Event header
-        // there is nothing to dispatch on, so refuse the delivery loudly
-        // instead of returning an event with an empty type that matches no
-        // handler. Code written for 0.2.0 passes no headers.
-        if ($eventType === null) {
-            throw new SignatureVerificationException(
-                'Siren names this delivery\'s event in the X-Siren-Event header, and the body does not '
-                . 'carry it. Pass that header as $eventType, or call constructEventFromHeaders().',
-            );
-        }
-
+        /** @var array<string, mixed> $decoded */
         return new WebhookEvent(
-            type: $eventType,
+            type: (string) $eventType,
             data: $decoded,
             deliveryId: $deliveryId,
             body: $decoded,

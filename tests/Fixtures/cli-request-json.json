@@ -1,0 +1,43 @@
+{
+  "id": "apr_9c60190a4501399d0ae55f041c237b39",
+  "appId": 4,
+  "feature": "app:12",
+  "kind": "payoutMethod",
+  "mode": "ask",
+  "subject": {
+    "type": "payout",
+    "id": "88"
+  },
+  "status": "sent",
+  "sendCount": 1,
+  "answerBy": "2026-11-18T09:14:03+00:00",
+  "answeredBy": null,
+  "answeredAt": null,
+  "lastError": null,
+  "createdAt": "2026-11-17T09:14:03+00:00",
+  "data": {
+    "payoutId": 88,
+    "amount": 2500,
+    "currency": "USD"
+  },
+  "answer": null,
+  "answeredByUser": null,
+  "appKey": "acme-payouts",
+  "featureKey": "acme-ledger",
+  "sends": [
+    {
+      "id": 9,
+      "eventId": "apr_9c60190a4501399d0ae55f041c237b39.1",
+      "eventType": "app.request",
+      "status": "delivered",
+      "attemptCount": 1,
+      "httpStatusCode": 200,
+      "responseBody": "{\"received\":true}",
+      "errorMessage": null,
+      "nextRetryAt": null,
+      "deliveredAt": "2026-11-17 09:14:04",
+      "dateCreated": "2026-11-17 09:14:03",
+      "dateModified": "2026-11-17 09:14:04"
+    }
+  ]
+}

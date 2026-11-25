@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Siren\Sdk;
 
 use Siren\Sdk\Auth\AccessTokenSource;
+use Siren\Sdk\Auth\AppTokens;
 use Siren\Sdk\Auth\StaticAccessToken;
 use Siren\Sdk\Http\GuzzleHttpClient;
 use Siren\Sdk\Http\HttpClient;
 use Siren\Sdk\Http\StreamHttpClient;
-use Siren\Sdk\Resources\ApiKeys;
 use Siren\Sdk\Resources\CollaboratorGroups;
 use Siren\Sdk\Resources\Collaborators;
 use Siren\Sdk\Resources\Conversions;
@@ -18,13 +18,16 @@ use Siren\Sdk\Resources\CustomCurrencies;
 use Siren\Sdk\Resources\Distributors;
 use Siren\Sdk\Resources\Engagements;
 use Siren\Sdk\Resources\Events;
+use Siren\Sdk\Resources\Fulfillments;
 use Siren\Sdk\Resources\ListResource;
 use Siren\Sdk\Resources\Mappings;
 use Siren\Sdk\Resources\Opportunities;
+use Siren\Sdk\Resources\Payouts;
 use Siren\Sdk\Resources\ProgramGroups;
 use Siren\Sdk\Resources\Programs;
 use Siren\Sdk\Resources\Settings;
 use Siren\Sdk\Resources\Transactions;
+use Siren\Sdk\Resources\Apps;
 use Siren\Sdk\Resources\Webhooks;
 
 /**
@@ -42,12 +45,15 @@ use Siren\Sdk\Resources\Webhooks;
  * ```
  *
  * Configuration keys:
- * - `apiKey` — the `sk_live_...` key from the Siren dashboard. Required
- *   unless `accessToken` is given.
+ * - `apiKey` — the `sk_live_...` key from the Siren dashboard, or the
+ *   app's key. Defaults to the `SIREN_API_KEY` environment variable when
+ *   neither it nor `accessToken` is given.
  * - `accessToken` — an {@see AccessTokenSource} (or a plain token string)
  *   for hosts that hold an OAuth grant. The SDK refreshes it once after a
  *   401 and repeats the request.
- * - `baseUrl` — defaults to `https://api.sirenaffiliates.com/siren/v1`.
+ * - `baseUrl` — defaults to the `SIREN_BASE_URL` environment variable, which
+ *   `siren apps apply` writes to `.env.sandbox` for a sandbox, and without
+ *   it to Siren Cloud, `https://api.sirenaffiliates.com/siren/v1`.
  * - `timeout` — request timeout in seconds, default 30.
  * - `maxRetries` — retries for network errors and 429/5xx on idempotent
  *   operations, default 2. Writes and management calls are never
@@ -56,6 +62,10 @@ use Siren\Sdk\Resources\Webhooks;
  *   {@see HttpClient} the host implements, or a preconfigured
  *   `GuzzleHttp\ClientInterface`. Without one, the SDK uses Guzzle when it
  *   is installed and PHP streams when it is not.
+ * - `tokenCache` — where the short-lived app tokens are kept between
+ *   requests, so every PHP worker shares them: a PSR-16
+ *   `Psr\SimpleCache\CacheInterface`, or false to keep them in memory only.
+ *   Without it the SDK uses APCu when it is on, and memory when it is not.
  */
 class Siren
 {
@@ -63,14 +73,14 @@ class Siren
     public const DEFAULT_TIMEOUT = 30.0;
     public const DEFAULT_MAX_RETRIES = 2;
 
-    /** Ingest commerce and tracking events: `sale`, `refund`, `siteVisited`, `ingest`. */
+    /** Send events: `sale`, `refund`, `siteVisited`, `ingest`, and browser tokens for a page's custom events. */
     public readonly Events $events;
 
     /** Verify inbound webhook signatures and manage subscriptions. */
     public readonly Webhooks $webhooks;
 
-    /** Manage API keys: `create`, `list`, `revoke`. Takes a signed-in dashboard session. */
-    public readonly ApiKeys $apiKeys;
+    /** An app's side of Siren's exchange: `verifyRequest`, and `requests->answer`. */
+    public readonly Apps $apps;
 
     /** Conversions: list, read, create, update, delete, and bulk actions. */
     public readonly Conversions $conversions;
@@ -87,14 +97,22 @@ class Siren
     public readonly ListResource $obligations;
 
     /**
-     * Reconciliation reader for `GET /payouts`. Filters: `id`,
-     * `fulfillmentId`, `collaboratorId`, `status`, `currency`. A connected
-     * site must send `id`, `collaboratorId` or `fulfillmentId`, or Siren
-     * Cloud answers 403 with `site_filter_required`. An API key needs
+     * Payouts: the reconciliation reader for `GET /payouts`, and `retrieve`
+     * for one payout. Filters: `id`, `fulfillmentId`, `collaboratorId`,
+     * `status`, `currency`. A connected site must send `id`,
+     * `collaboratorId` or `fulfillmentId`, or Siren Cloud answers 403 with
+     * `site_filter_required`. An API key needs
      * {@see ApiKeyScope::LEDGER_PAYOUTS_READ}, and must be
      * organization-wide, because payouts are not kept by store.
      */
-    public readonly ListResource $payouts;
+    public readonly Payouts $payouts;
+
+    /**
+     * Fulfillments, the batches Siren pays payouts in: `list` and
+     * `retrieve`. An API key needs {@see ApiKeyRecordScope::FULFILLMENTS_READ},
+     * and must be organization-wide.
+     */
+    public readonly Fulfillments $fulfillments;
 
     /** Collaborators, with their tracking codes (`->aliases`) and program enrollments (`->enrollments`). */
     public readonly Collaborators $collaborators;
@@ -138,10 +156,14 @@ class Siren
      *     maxRetries?: int,
      *     httpClient?: HttpClient|\GuzzleHttp\ClientInterface,
      *     sleeper?: callable(float): void,
+     *     clock?: callable(): float,
+     *     tokenCache?: \Psr\SimpleCache\CacheInterface|false,
      * } $config
      */
-    public function __construct(array $config)
+    public function __construct(array $config = [])
     {
+        $config['apiKey'] = self::apiKeyFrom($config);
+
         $maxRetries = (int) ($config['maxRetries'] ?? self::DEFAULT_MAX_RETRIES);
 
         if ($maxRetries < 0) {
@@ -150,20 +172,21 @@ class Siren
 
         $transport = new HttpTransport(
             tokens: self::resolveTokens($config),
-            baseUrl: (string) ($config['baseUrl'] ?? self::DEFAULT_BASE_URL),
+            baseUrl: self::baseUrlFrom($config),
             timeout: (float) ($config['timeout'] ?? self::DEFAULT_TIMEOUT),
             maxRetries: $maxRetries,
             client: self::resolveHttpClient($config['httpClient'] ?? null),
             sleeper: $config['sleeper'] ?? null,
         );
 
-        $this->events = new Events($transport);
+        $this->events = new Events($transport, self::resolveAppTokens($config, $transport));
         $this->webhooks = new Webhooks($transport);
-        $this->apiKeys = new ApiKeys($transport);
+        $this->apps = new Apps($transport);
         $this->conversions = new Conversions($transport);
         $this->transactions = new Transactions($transport);
         $this->obligations = new ListResource($transport, '/obligations');
-        $this->payouts = new ListResource($transport, '/payouts');
+        $this->payouts = new Payouts($transport);
+        $this->fulfillments = new Fulfillments($transport);
         $this->collaborators = new Collaborators($transport);
         $this->programs = new Programs($transport);
         $this->programGroups = new ProgramGroups($transport);
@@ -205,12 +228,73 @@ class Siren
 
         if (!is_string($apiKey) || $apiKey === '') {
             throw new \InvalidArgumentException(
-                'The "apiKey" option is required. Mint one in the Siren dashboard (Settings > API Keys), '
-                . 'or pass an "accessToken" source.',
+                'The Siren client needs a key. Pass the "apiKey" option or set the SIREN_API_KEY environment variable. '
+                . 'An app uses its own key, which Siren showed when it made the app. Or pass an "accessToken" source.',
             );
         }
 
         return new StaticAccessToken($apiKey);
+    }
+
+    /**
+     * The `baseUrl` option, else a non-empty `SIREN_BASE_URL` environment
+     * variable, else Siren Cloud.
+     *
+     * @param array<string, mixed> $config
+     */
+    private static function baseUrlFrom(array $config): string
+    {
+        if (isset($config['baseUrl'])) {
+            return (string) $config['baseUrl'];
+        }
+
+        $fromEnvironment = getenv('SIREN_BASE_URL');
+
+        return is_string($fromEnvironment) && $fromEnvironment !== '' ? $fromEnvironment : self::DEFAULT_BASE_URL;
+    }
+
+    /**
+     * The key the client sends with: the `apiKey` option, or else, when no
+     * `accessToken` is given either, the `SIREN_API_KEY` environment variable.
+     *
+     * @param array<string, mixed> $config
+     */
+    private static function apiKeyFrom(array $config): mixed
+    {
+        $apiKey = $config['apiKey'] ?? null;
+
+        if ($apiKey !== null || ($config['accessToken'] ?? null) !== null) {
+            return $apiKey;
+        }
+
+        $fromEnvironment = getenv('SIREN_API_KEY');
+
+        return is_string($fromEnvironment) && $fromEnvironment !== '' ? $fromEnvironment : null;
+    }
+
+    /**
+     * The app token source for a client built with a key. A client built
+     * with an access token sends with that token and never asks for one.
+     *
+     * @param array<string, mixed> $config
+     */
+    private static function resolveAppTokens(array $config, HttpTransport $transport): ?AppTokens
+    {
+        $apiKey = $config['apiKey'] ?? null;
+
+        if (!is_string($apiKey) || $apiKey === '') {
+            return null;
+        }
+
+        $cache = $config['tokenCache'] ?? null;
+
+        if ($cache !== null && $cache !== false && !$cache instanceof \Psr\SimpleCache\CacheInterface) {
+            throw new \InvalidArgumentException('The "tokenCache" option must be a Psr\SimpleCache\CacheInterface or false.');
+        }
+
+        $clock = $config['clock'] ?? null;
+
+        return new AppTokens($transport, $apiKey, is_callable($clock) ? $clock : null, $cache);
     }
 
     private static function resolveHttpClient(mixed $httpClient): HttpClient

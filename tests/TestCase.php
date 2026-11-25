@@ -27,6 +27,14 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
 
     protected MockHandler $mockHandler;
 
+    /**
+     * The Siren that Siren's request fixtures name in their `answerUrl`
+     * (tests/Fixtures/apps-feature-contracts/requests.json). A client that
+     * answers those requests is made on it, or the handler refuses them as
+     * from another Siren.
+     */
+    protected const FIXTURE_SIREN = 'https://cloud.example.com/siren/v1';
+
     /** @var list<float> Delays requested from the backoff sleeper. */
     protected array $sleeps = [];
 
@@ -52,6 +60,25 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
                 $this->sleeps[] = $seconds;
             },
         ], $config));
+    }
+
+    /**
+     * Siren's own request for a kind, from its feature contracts, signed now
+     * by the SDK's testing helper with the request's own id, app, key and
+     * data, and its answerUrl on `$baseUrl`.
+     */
+    protected static function signedContract(string $kind, string $secret, string $baseUrl = self::FIXTURE_SIREN, bool $test = false, ?string $id = null): \Siren\Sdk\Testing\SignedRequest
+    {
+        $contracts = json_decode((string) file_get_contents(__DIR__ . '/Fixtures/apps-feature-contracts/requests.json'), true, 512, JSON_THROW_ON_ERROR);
+        $request = $contracts['kinds'][$kind]['request'];
+
+        return \Siren\Sdk\Testing\AppRequests::make($kind, $request['feature']['key'], [
+            'secret' => $secret,
+            'id' => $id ?? $request['id'],
+            'app' => $request['app'],
+            'data' => $request['data'],
+            'baseUrl' => $baseUrl,
+        ] + ($test ? ['test' => true] : []));
     }
 
     protected RecordingHttpClient $http;

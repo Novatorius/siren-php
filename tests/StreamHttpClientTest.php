@@ -49,8 +49,11 @@ final class StreamHttpClientTest extends TestCase
         self::$server = $process;
         self::$baseUrl = 'http://127.0.0.1:' . $port . '/siren/v1';
 
-        for ($i = 0; $i < 100; $i++) {
-            $probe = @fsockopen('127.0.0.1', $port);
+        // A loaded machine can take seconds to start PHP, so wait up to 30.
+        $until = microtime(true) + 30;
+
+        while (microtime(true) < $until) {
+            $probe = @fsockopen('127.0.0.1', $port, $errno, $error, 1.0);
 
             if ($probe !== false) {
                 fclose($probe);

@@ -104,7 +104,7 @@ final class SirenClientTest extends TestCase
         $this->assertInstanceOf(\Siren\Sdk\Resources\Events::class, $siren->events);
         $this->assertInstanceOf(\Siren\Sdk\Resources\Webhooks::class, $siren->webhooks);
         $this->assertInstanceOf(\Siren\Sdk\Resources\WebhookSubscriptions::class, $siren->webhooks->subscriptions);
-        $this->assertInstanceOf(\Siren\Sdk\Resources\ApiKeys::class, $siren->apiKeys);
+        $this->assertInstanceOf(\Siren\Sdk\Resources\Apps::class, $siren->apps);
         $this->assertInstanceOf(\Siren\Sdk\Resources\ListResource::class, $siren->conversions);
         $this->assertInstanceOf(\Siren\Sdk\Resources\ListResource::class, $siren->transactions);
         $this->assertInstanceOf(\Siren\Sdk\Resources\ListResource::class, $siren->obligations);

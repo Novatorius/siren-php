@@ -147,7 +147,8 @@ final class EventsTest extends TestCase
 
     public function testIngestPostsToTheCustomSlugAndPassesThePayloadThrough(): void
     {
-        $siren = $this->mockSiren([self::jsonResponse(200, [], ['X-Siren-OID' => '5'])]);
+        // A custom event trades the key for an app token first (slice C13), see AppTokensTest.
+        $siren = $this->mockSiren([self::appToken(), self::jsonResponse(200, [], ['X-Siren-OID' => '5'])]);
 
         $payload = ['points' => 250, 'reason' => 'review-submitted'];
         $result = $siren->events->ingest('loyalty-points-earned', $payload);
@@ -163,7 +164,7 @@ final class EventsTest extends TestCase
 
     public function testIngestUrlEncodesTheSlug(): void
     {
-        $siren = $this->mockSiren([self::jsonResponse(200)]);
+        $siren = $this->mockSiren([self::appToken(), self::jsonResponse(200)]);
 
         $siren->events->ingest('weird/slug', []);
 
@@ -322,5 +323,10 @@ final class EventsTest extends TestCase
         $result = $siren->events->refund(['source' => 'stripe', 'externalId' => 'o-1']);
 
         $this->assertNull($result->getOpportunityId());
+    }
+
+    private static function appToken(): \GuzzleHttp\Psr7\Response
+    {
+        return self::jsonResponse(200, ['access_token' => 'srv.token', 'token_type' => 'Bearer', 'expires_in' => 1200]);
     }
 }
