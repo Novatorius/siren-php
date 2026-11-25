@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk\Resources;
 
 use Siren\Sdk\AppRequest;
+use Siren\Sdk\AppAnswerPoster;
 use Siren\Sdk\AppRequestHandler;
 use Siren\Sdk\Exception\SignatureVerificationException;
 use Siren\Sdk\HttpTransport;
@@ -36,9 +37,13 @@ final class Apps
     /** One app's features: `create`, `retrieve`, `update` and `delete`. */
     public readonly AppFeatures $features;
 
+    /** What posts and checks answers, shared by `requests` and the request handler. */
+    private readonly AppAnswerPoster $poster;
+
     public function __construct(HttpTransport $transport)
     {
-        $this->requests = new AppRequests($transport);
+        $this->poster = new AppAnswerPoster($transport);
+        $this->requests = new AppRequests($transport, $this->poster);
         $this->features = new AppFeatures($transport);
     }
 
@@ -150,7 +155,7 @@ final class Apps
             $signingSecret = is_string($fromEnvironment) ? $fromEnvironment : '';
         }
 
-        return new AppRequestHandler($this->requests, $signingSecret, $options);
+        return new AppRequestHandler($this->poster, $signingSecret, $options);
     }
 
     /**

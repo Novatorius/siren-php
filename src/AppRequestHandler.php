@@ -167,7 +167,7 @@ final class AppRequestHandler
      * @throws AppHandlerException For an empty secret or an option it can't use.
      */
     public function __construct(
-        private readonly AppRequests $requests,
+        private readonly AppAnswerPoster $answers,
         #[\SensitiveParameter] private readonly string $secret,
         array $options = [],
     ) {
@@ -666,7 +666,7 @@ final class AppRequestHandler
 
         try {
             try {
-                $this->requests->check($request->id, $answer);
+                $this->answers->check($request->id, $answer);
             } catch (\InvalidArgumentException $e) {
                 // The function's answer can't be sent, so the mistake is in the app's code.
                 throw new AppHandlerException($e->getMessage(), 0, null, null, $e);
@@ -684,7 +684,7 @@ final class AppRequestHandler
                 return;
             }
 
-            $this->requests->answerRetried($request->id, $answer);
+            $this->answers->answerRetried($request->id, $answer);
         } catch (ConflictException $e) {
             // Siren took another answer or stopped waiting, so it sends nothing again.
             $sendsAgain = !in_array($e->getErrorCode(), ['app_request_already_answered', 'app_request_dropped'], true);
@@ -779,7 +779,7 @@ final class AppRequestHandler
     private function answerGoesElsewhere(AppRequest $request): ?string
     {
         $answerUrl = (string) $request->answerUrl;
-        $base = $this->requests->baseUrl();
+        $base = $this->answers->baseUrl();
         $sent = self::origin($answerUrl);
         $ours = self::origin($base);
 

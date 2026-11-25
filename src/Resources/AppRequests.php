@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Siren\Sdk\Resources;
 
+use Siren\Sdk\AppAnswerPoster;
 use Siren\Sdk\AppAnswerReceipt;
 use Siren\Sdk\Exception\ApiException;
 use Siren\Sdk\Exception\AuthenticationException;
-use Siren\Sdk\Exception\ErrorCode;
 use Siren\Sdk\Exception\SirenException;
 use Siren\Sdk\HttpTransport;
 
@@ -66,18 +66,14 @@ final class AppRequests
     /** A request key: `apr_` and 32 lowercase hex characters. */
     public const REQUEST_ID_PATTERN = '/^apr_[0-9a-f]{32}$/';
 
-    /**
-     * What the uncoded 401 on the answer route means for an app. Siren's key
-     * check answers a missing or unknown key with 401 and no code, before
-     * the answer route can send `app_answer_unauthorized`, so the SDK gives
-     * that 401 the code, and keeps Siren's error as the previous exception.
-     */
-    private const UNAUTHORIZED_ANSWER = 'Siren did not accept this key on the answer route. An app answers with its own key, '
-        . 'the SIREN_API_KEY saved beside its app file. When that key is lost, run siren apps rotate-key <app key> to make a new one. '
-        . 'When the app holds no key, as after its key was revoked, run siren apps add-key <app key>.';
+    private readonly AppAnswerPoster $poster;
 
-    public function __construct(private readonly HttpTransport $transport)
+    /**
+     * @param AppAnswerPoster|null $poster What posts and checks answers, shared with the request handler. Made from the transport when not given.
+     */
+    public function __construct(private readonly HttpTransport $transport, ?AppAnswerPoster $poster = null)
     {
+        $this->poster = $poster ?? new AppAnswerPoster($transport);
     }
 
     /**
@@ -108,7 +104,7 @@ final class AppRequests
      */
     public function answer(string $id, array $answer): AppAnswerReceipt
     {
-        return $this->send($id, $answer, false, 'apps->requests->answer()');
+        return $this->poster->post($id, $answer, false, 'apps->requests->answer()');
     }
 
     /**
@@ -210,129 +206,5 @@ final class AppRequests
         }
 
         return $id;
-    }
-
-    /**
-     * Answers an ask as {@see answer()} does, with the same checks, but sends
-     * it again after a lost connection, a 429 or a 5xx, inside the client's
-     * `maxRetries`. The resend is safe because it carries the very same
-     * answer, which Siren takes again as a duplicate. Only
-     * {@see \Siren\Sdk\AppRequestHandler} calls it, after the function it
-     * runs returns an answer.
-     *
-     * @internal
-     *
-     * @param array<int|string, mixed> $answer
-     *
-     * @throws \InvalidArgumentException When the id or the answer can't be sent.
-     * @throws SirenException When Siren refuses the answer, or the last try fails.
-     */
-    public function answerRetried(string $id, array $answer): AppAnswerReceipt
-    {
-        return $this->send($id, $answer, true, 'The request handler');
-    }
-
-    /**
-     * The base address this client sends answers to, with no trailing slash.
-     *
-     * @internal For {@see \Siren\Sdk\AppRequestHandler}, which checks it against a request's `answerUrl`.
-     */
-    public function baseUrl(): string
-    {
-        return $this->transport->baseUrl;
-    }
-
-    /**
-     * Checks an answer as {@see answer()} does before sending, and sends nothing.
-     *
-     * @internal For {@see \Siren\Sdk\AppRequestHandler::simulate()}.
-     *
-     * @param array<int|string, mixed> $answer
-     *
-     * @throws \InvalidArgumentException When the id or the answer can't be sent.
-     */
-    public function check(string $id, array $answer, string $caller = 'The request handler'): void
-    {
-        $this->encode($id, $answer, $caller);
-    }
-
-    /**
-     * @param array<int|string, mixed> $answer
-     */
-    private function send(string $id, array $answer, bool $retryable, string $caller): AppAnswerReceipt
-    {
-        $this->encode($id, $answer, $caller);
-
-        $path = '/apps/requests/' . $id . '/answer';
-
-        try {
-            $response = $this->transport->request('POST', $path, $answer, [], $retryable);
-        } catch (AuthenticationException $e) {
-            if ($e->getStatusCode() === 401 && ($e->getErrorCode() === null || $e->getErrorCode() === '')) {
-                throw new AuthenticationException(self::UNAUTHORIZED_ANSWER, 401, ErrorCode::APP_ANSWER_UNAUTHORIZED, $e->getErrorData(), $e);
-            }
-
-            throw $e;
-        }
-
-        $reply = json_decode($response->getRawBody(), true);
-
-        if (
-            !is_array($reply)
-            || ($reply['status'] ?? null) !== 'accepted'
-            || (array_key_exists('duplicate', $reply) && !is_bool($reply['duplicate']))
-        ) {
-            throw new ApiException(
-                sprintf('Siren answered POST %s with a body that is not an accepted answer.', $path),
-                $response->getStatusCode(),
-                null,
-                is_array($reply) ? $reply : null,
-            );
-        }
-
-        return new AppAnswerReceipt('accepted', ($reply['duplicate'] ?? false) === true);
-    }
-
-    /**
-     * @param array<int|string, mixed> $answer
-     *
-     * @throws \InvalidArgumentException When the id or the answer can't be sent.
-     */
-    private function encode(string $id, array $answer, string $caller): string
-    {
-        if (preg_match(self::REQUEST_ID_PATTERN, $id) !== 1) {
-            throw new \InvalidArgumentException(sprintf(
-                '%s needs a request id of apr_ and 32 lowercase hex characters, and got %s.',
-                $caller,
-                json_encode($id),
-            ));
-        }
-
-        if ($answer === [] || array_is_list($answer)) {
-            throw new \InvalidArgumentException(sprintf(
-                "%s takes the answer as an object, such as ['outcome' => 'paid', 'reference' => 'TX-1'].",
-                $caller,
-            ));
-        }
-
-        if (!is_string($answer['outcome'] ?? null) || $answer['outcome'] === '') {
-            throw new \InvalidArgumentException(sprintf("%s needs a text outcome in the answer, such as 'paid' or 'resolved'.", $caller));
-        }
-
-        try {
-            $json = json_encode($answer, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            throw new \InvalidArgumentException(sprintf('%s could not write the answer as JSON.', $caller), 0, $e);
-        }
-
-        if (strlen($json) > self::MAX_ANSWER_BYTES) {
-            throw new \InvalidArgumentException(sprintf(
-                '%s takes an answer of at most %d bytes as JSON, which Siren also refuses past.',
-                $caller,
-                self::MAX_ANSWER_BYTES,
-            ));
-        }
-
-        return $json;
     }
 }
