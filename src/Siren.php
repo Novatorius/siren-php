@@ -51,8 +51,9 @@ use Siren\Sdk\Resources\Webhooks;
  * - `accessToken` — an {@see AccessTokenSource} (or a plain token string)
  *   for hosts that hold an OAuth grant. The SDK refreshes it once after a
  *   401 and repeats the request.
- * - `baseUrl` — defaults to Siren Cloud, `https://api.sirenaffiliates.com/siren/v1`.
- *   Set it only for a local or sandbox Siren.
+ * - `baseUrl` — defaults to the `SIREN_BASE_URL` environment variable, which
+ *   `siren apps apply` writes to `.env.sandbox` for a sandbox, and without
+ *   it to Siren Cloud, `https://api.sirenaffiliates.com/siren/v1`.
  * - `timeout` — request timeout in seconds, default 30.
  * - `maxRetries` — retries for network errors and 429/5xx on idempotent
  *   operations, default 2. Writes and management calls are never
@@ -171,7 +172,7 @@ class Siren
 
         $transport = new HttpTransport(
             tokens: self::resolveTokens($config),
-            baseUrl: (string) ($config['baseUrl'] ?? self::DEFAULT_BASE_URL),
+            baseUrl: self::baseUrlFrom($config),
             timeout: (float) ($config['timeout'] ?? self::DEFAULT_TIMEOUT),
             maxRetries: $maxRetries,
             client: self::resolveHttpClient($config['httpClient'] ?? null),
@@ -233,6 +234,23 @@ class Siren
         }
 
         return new StaticAccessToken($apiKey);
+    }
+
+    /**
+     * The `baseUrl` option, else a non-empty `SIREN_BASE_URL` environment
+     * variable, else Siren Cloud.
+     *
+     * @param array<string, mixed> $config
+     */
+    private static function baseUrlFrom(array $config): string
+    {
+        if (isset($config['baseUrl'])) {
+            return (string) $config['baseUrl'];
+        }
+
+        $fromEnvironment = getenv('SIREN_BASE_URL');
+
+        return is_string($fromEnvironment) && $fromEnvironment !== '' ? $fromEnvironment : self::DEFAULT_BASE_URL;
     }
 
     /**

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `new Siren()` reads its base URL from the `SIREN_BASE_URL` environment
+  variable when `baseUrl` is not passed, as it reads `SIREN_API_KEY`, and uses
+  Siren Cloud when the variable is unset or empty. `siren apps apply` writes
+  the variable to `.env.sandbox`, so a handler answers a sandbox ask on the
+  sandbox instead of refusing it as from another Siren. A `baseUrl` passed in
+  code wins.
+- `AppRequests::STATUSES` holds all eight statuses Siren keeps, with
+  `applying`, which it lacked, so `apps->requests->list()` takes
+  `['status' => 'applying']`. A test compares the list with Siren's
+  `AppRequest::STATUS_*` constants when `SIREN_CHECKOUT` names a checkout.
 - `$answers->later()` gives the value an ask's function returns when the app
   will answer the request itself with `apps->requests->answer()`. The handler
   then posts nothing and reports nothing.

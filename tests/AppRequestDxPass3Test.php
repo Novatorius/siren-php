@@ -615,7 +615,7 @@ final class AppRequestDxPass3Test extends TestCase
     {
         return [
             'a filter Siren does not read' => [fn ($r) => $r->list(['app' => 'acme']), 'does not read app'],
-            'an unknown status' => [fn ($r) => $r->list(['status' => 'waiting']), 'takes a status of pending, sent, delivered, answered, applied, needs_attention, dropped'],
+            'an unknown status' => [fn ($r) => $r->list(['status' => 'waiting']), 'takes a status of pending, sent, delivered, answered, applying, applied, needs_attention, dropped'],
             'a bad id to retrieve' => [fn ($r) => $r->retrieve('apr_1'), 'needs a request id'],
             'a bad id to resend' => [fn ($r) => $r->resend('42'), 'needs a request id'],
         ];

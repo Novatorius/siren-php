@@ -103,7 +103,8 @@ function for each feature by its kind and key, and mount the handler at the
 app's address. It checks Siren's signature, finds the function, replies, and
 for an ask posts the answer the function returns once the reply has gone.
 `new Siren()` reads the app's own key from `SIREN_API_KEY`, and the handler
-posts answers with it. `requestHandler()` reads the app's signing secret,
+posts answers with it, to the Siren that `SIREN_BASE_URL` names, or Siren
+Cloud when it is unset. `requestHandler()` reads the app's signing secret,
 which Siren showed once when it made the app's address, from
 `SIREN_SIGNING_SECRET`. Pass either one in code to override the variable.
 
@@ -257,7 +258,9 @@ It works with a sandbox Siren only, and takes three terminals.
 
 1. Run `siren apps apply` with a sandbox key, one that starts with
    `sk_test_`. On a sandbox the app needs no address, and apply writes the
-   app's key to `.env.sandbox` as `SIREN_API_KEY`. An app with no address
+   app's key to `.env.sandbox` as `SIREN_API_KEY`, beside `SIREN_BASE_URL`,
+   the sandbox's address. `new Siren()` reads both, so the handler answers a
+   sandbox ask on the sandbox. An app with no address
    gets no signing secret, so the file holds no `SIREN_SIGNING_SECRET` yet.
 2. In a terminal of its own, run
    `siren listen --forward-to localhost:3000/siren` and leave it open. When
@@ -927,10 +930,7 @@ require 'vendor/autoload.php';
 
 use Siren\Sdk\Siren;
 
-$siren = new Siren([
-    'apiKey'  => getenv('SIREN_API_KEY'), // the app's key
-    'baseUrl' => getenv('SIREN_BASE_URL') ?: Siren::DEFAULT_BASE_URL,
-]);
+$siren = new Siren(); // the app's key and Siren's address, from SIREN_API_KEY and SIREN_BASE_URL
 
 $result = $siren->events->ingest('signup-completed', [
     'collaboratorId' => 12,
@@ -967,10 +967,7 @@ require 'vendor/autoload.php';
 
 use Siren\Sdk\Siren;
 
-$siren = new Siren([
-    'apiKey'  => getenv('SIREN_API_KEY'),
-    'baseUrl' => getenv('SIREN_BASE_URL') ?: Siren::DEFAULT_BASE_URL,
-]);
+$siren = new Siren(); // the app's key and Siren's address, from SIREN_API_KEY and SIREN_BASE_URL
 
 $siren->events->serveBrowserToken(['events' => ['signup-completed']]);
 ```
@@ -987,10 +984,7 @@ require 'vendor/autoload.php';
 
 use Siren\Sdk\Siren;
 
-$siren = new Siren([
-    'apiKey'  => getenv('SIREN_API_KEY'),
-    'baseUrl' => getenv('SIREN_BASE_URL') ?: Siren::DEFAULT_BASE_URL,
-]);
+$siren = new Siren(); // the app's key and Siren's address, from SIREN_API_KEY and SIREN_BASE_URL
 
 $handler = $siren->events->browserTokenHandler(['events' => ['signup-completed']]);
 
@@ -1468,7 +1462,7 @@ $approved = $siren->conversions->list(['status' => ConversionStatus::APPROVED]);
 ```php
 $siren = new Siren([
     'apiKey'     => 'sk_live_...',                              // default SIREN_API_KEY, or 'accessToken', see below
-    'baseUrl'    => 'https://api.sirenaffiliates.com/siren/v1', // default, Siren Cloud
+    'baseUrl'    => 'https://api.sirenaffiliates.com/siren/v1', // default SIREN_BASE_URL, else Siren Cloud
     'timeout'    => 30,                                         // seconds, default 30
     'maxRetries' => 2,                                          // default 2
     'httpClient' => $client,                                    // optional, see below
@@ -1480,8 +1474,9 @@ Pass `apiKey` or `accessToken`, not both. With neither, the client reads
 `SIREN_API_KEY`, and with no key there either it refuses to start, naming the
 option and the variable.
 
-The client talks to Siren Cloud. Set `baseUrl` only for a local or sandbox
-Siren. The request handler posts an ask's answer only to `baseUrl`, never to
+The client talks to Siren Cloud unless `baseUrl` or the `SIREN_BASE_URL`
+environment variable names another Siren, such as a sandbox or a local one.
+A `baseUrl` passed in code wins over the variable. The request handler posts an ask's answer only to `baseUrl`, never to
 an address from the request, so an ask from another Siren gets a 500 whose
 error says which `baseUrl` to set. Siren Cloud's two hosts,
 `api.sirenaffiliates.com` and `app.sirenaffiliates.com`, count as one Siren.

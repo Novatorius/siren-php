@@ -53,12 +53,14 @@ final class AppRequests
 
     /**
      * The statuses of a request Siren sent an app (lib/Apps/Core/Models/AppRequest.php
-     * in Siren). A tell ends at `delivered`. An ask ends at `applied` once its
-     * answer has done its work. `needs_attention` waits for a person or a late
-     * answer, and an ask that holds a reward ends at `dropped` when Siren went
-     * on without it.
+     * in Siren, its `STATUS_*` constants, in its order). A tell ends at
+     * `delivered`. An ask's answer is `answered`, then `applying` while Siren
+     * does its work, then `applied`. `needs_attention` waits for a person or
+     * a late answer, and an ask that holds a reward ends at `dropped` when
+     * Siren went on without it. {@see list()} takes any of them as its
+     * `status` filter.
      */
-    public const STATUSES = ['pending', 'sent', 'delivered', 'answered', 'applied', 'needs_attention', 'dropped'];
+    public const STATUSES = ['pending', 'sent', 'delivered', 'answered', 'applying', 'applied', 'needs_attention', 'dropped'];
 
     /** The longest answer Siren takes, in bytes of JSON. Siren refuses past it too. */
     public const MAX_ANSWER_BYTES = 16384;
