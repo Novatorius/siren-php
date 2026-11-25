@@ -48,8 +48,11 @@ use Siren\Sdk\HttpTransport;
  */
 final class AppRequests
 {
-    /** The filters {@see list()} sends, the one `GET /apps/requests` reads (ListAppRequests.php in Siren). */
-    public const LIST_FILTERS = ['status'];
+    /** The params {@see list()} sends, the ones `GET /apps/requests` reads (ListAppRequests.php in Siren). */
+    public const LIST_FILTERS = ['status', 'limit', 'before'];
+
+    /** The most requests one page holds. Siren lists 50 when `limit` is absent. */
+    public const MAX_LIST_LIMIT = 100;
 
     /**
      * The statuses of a request Siren sent an app (lib/Apps/Core/Models/AppRequest.php
@@ -110,15 +113,23 @@ final class AppRequests
     }
 
     /**
-     * The organization's latest requests, newest first, at most 50, from
-     * `GET /apps/requests`, with `?status=` when `$params['status']` is
-     * given. Retried as a read.
+     * The organization's latest requests, newest first, from
+     * `GET /apps/requests`. Retried as a read.
      *
-     * @param array{status?: string} $params
+     * - `status` keeps one status, one of {@see STATUSES}.
+     * - `limit` is how many a page holds, 1 to {@see MAX_LIST_LIMIT}. Siren lists 50 without it.
+     * - `before` is a request id. The page then holds only requests older
+     *   than it, so the last id of one page reads the next. Siren lists none
+     *   for an id the organization has no request for.
+     *
+     * Siren ignores `limit` and `before` for `needs_attention`, whose list
+     * comes whole.
+     *
+     * @param array{status?: string, limit?: int, before?: string} $params
      *
      * @return list<AppRequestRecord>
      *
-     * @throws \InvalidArgumentException For a filter other than {@see LIST_FILTERS}, or a status outside {@see STATUSES}.
+     * @throws \InvalidArgumentException For a param other than {@see LIST_FILTERS}, a status outside {@see STATUSES}, a `limit` that is not a whole number from 1 to 100, or a `before` that is not a request id.
      * @throws ApiException When Siren answers 2xx with no list of requests.
      * @throws SirenException When Siren refuses it.
      */
@@ -140,7 +151,29 @@ final class AppRequests
             throw new \InvalidArgumentException(sprintf('apps->requests->list() takes a status of %s.', implode(', ', self::STATUSES)));
         }
 
-        $body = $this->transport->request('GET', '/apps/requests', null, $status === null ? [] : ['status' => $status])->json();
+        $query = $status === null ? [] : ['status' => $status];
+
+        if (array_key_exists('limit', $params)) {
+            $limit = $params['limit'];
+
+            if (!is_int($limit) || $limit < 1 || $limit > self::MAX_LIST_LIMIT) {
+                throw new \InvalidArgumentException(sprintf('apps->requests->list() takes a limit that is a whole number from 1 to %d.', self::MAX_LIST_LIMIT));
+            }
+
+            $query['limit'] = $limit;
+        }
+
+        if (array_key_exists('before', $params)) {
+            $before = $params['before'];
+
+            if (!is_string($before) || preg_match(self::REQUEST_ID_PATTERN, $before) !== 1) {
+                throw new \InvalidArgumentException('apps->requests->list() takes a before that is a request id, such as the last id of the page before.');
+            }
+
+            $query['before'] = $before;
+        }
+
+        $body = $this->transport->request('GET', '/apps/requests', null, $query)->json();
         $rows = $body['requests'] ?? null;
 
         if (!is_array($rows) || !array_is_list($rows) || array_filter($rows, static fn ($row): bool => !is_array($row)) !== []) {

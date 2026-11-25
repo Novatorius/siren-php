@@ -1209,7 +1209,20 @@ $request = $siren->apps->requests->retrieve($waiting[0]['id']);           // wit
 $siren->apps->requests->resend($request['id']);                          // a new answer window
 ```
 
-`list()` takes one filter, `status`, one of `AppRequests::STATUSES`.
+`list()` takes `status`, one of `AppRequests::STATUSES`, and pages with
+`limit` (1 to 100, 50 when absent) and `before`, a request id. A page with
+`before` holds only requests older than that one, so the last id of a page
+reads the next:
+
+```php
+$page = $siren->apps->requests->list(['limit' => 20]);
+if ($page !== []) {
+    $next = $siren->apps->requests->list(['limit' => 20, 'before' => $page[array_key_last($page)]['id']]);
+}
+```
+
+Siren ignores `limit` and `before` for `needs_attention`, whose list comes
+whole.
 `resend()` is sent once. Siren applies a stored answer it hasn't applied
 instead of sending the request again, and answers 409
 `app_request_not_resendable` for a request that is `applied`, a `delivered`
@@ -1890,7 +1903,7 @@ the subscription calls sit on `WebhookSubscriptions` beside `create`, `list`,
 | `webhooks->subscriptions->update` | no | an id below 1, any key outside `UPDATE_FIELDS` whatever its value, and an update with no field that is not `null` |
 | `webhooks->subscriptions->test` | no | an id below 1 |
 | `webhooks->subscriptions->deliveries` | yes | an id below 1 |
-| `apps->requests->list` | yes | a key other than `status`, and a status outside `STATUSES` |
+| `apps->requests->list` | yes | a key other than `status`, `limit` and `before`, a status outside `STATUSES`, a `limit` outside 1 to 100, and a `before` that is not a request id |
 | `apps->requests->retrieve` | yes | an id that is not `apr_` and 32 lowercase hex characters |
 | `apps->requests->resend` | no | an id that is not `apr_` and 32 lowercase hex characters |
 | `apps->features->create` | no | a bad app key, a field outside `CREATE_FIELDS`, no `kind` or `name`, and `fulfillmentMethod` |

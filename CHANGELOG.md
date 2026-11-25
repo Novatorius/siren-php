@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apps->requests->list()` pages with `limit` (1 to 100, 50 when absent) and
+  `before`, a request id whose older requests the page holds, as Siren's
+  `GET /apps/requests` now reads them. A bad `limit` or `before` is refused
+  before sending.
 - `new Siren()` reads its base URL from the `SIREN_BASE_URL` environment
   variable when `baseUrl` is not passed, as it reads `SIREN_API_KEY`, and uses
   Siren Cloud when the variable is unset or empty. `siren apps apply` writes
