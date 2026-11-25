@@ -9,13 +9,10 @@ use Siren\Sdk\HttpTransport;
 /**
  * Webhook subscription management (`/webhooks`).
  *
- * These routes take a signed-in dashboard session's access token, or an API
- * key with a webhook scope. {@see \Siren\Sdk\ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ}
- * opens `list()`, `events()`, `retrieve()` and `deliveries()`, and
- * {@see \Siren\Sdk\ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE} opens every
- * method here. The key must be organization-wide, because subscriptions are
- * not kept by store. A key bound to one store gets a
- * {@see \Siren\Sdk\Exception\StoreKeyNotAllowedException}.
+ * These routes take a signed-in dashboard session's access token. Siren
+ * refuses an API key with 401 `api_key_not_accepted`. An address is an
+ * app's part, so a subscription is made by giving an app a `url` and
+ * `events`, with `siren apps apply` or in Siren Cloud, never here.
  *
  * `retrieve()`, `update()`, `test()` and `deliveries()` throw
  * `InvalidArgumentException` before sending for an id below 1, and
@@ -125,35 +122,6 @@ final class WebhookSubscriptions
         $response = $this->transport->request('GET', self::path($id) . '/deliveries');
 
         return array_values(array_filter($response->json(), 'is_array'));
-    }
-
-    /**
-     * Registers a URL to receive event callbacks.
-     *
-     * Required: `targetUrl`, `events` (a list of {@see \Siren\Sdk\WebhookEventType}
-     * strings; `['*']` subscribes to all). Optional: `description`.
-     *
-     * The returned array includes `signingSecret` — it is returned ONCE and
-     * cannot be retrieved later; store it to verify future deliveries.
-     * This call is never auto-retried.
-     *
-     * @param array<string, mixed> $params
-     *
-     * @return array<string, mixed> The created subscription, including `signingSecret`.
-     */
-    public function create(array $params): array
-    {
-        foreach (['targetUrl', 'events'] as $field) {
-            if (!isset($params[$field]) || $params[$field] === '' || $params[$field] === []) {
-                throw new \InvalidArgumentException(
-                    sprintf('The "%s" field is required for webhooks->subscriptions->create().', $field),
-                );
-            }
-        }
-
-        $response = $this->transport->request('POST', '/webhooks', $params, [], retryable: false);
-
-        return $response->json();
     }
 
     /**

@@ -261,9 +261,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `logger`, `ErrorLogLogger` writes warnings and errors to `error_log()`. It
   also takes `clock`, for tests.
 - A refused signature reaches `onError` as a `SignatureVerificationException`
-  whose code says why: `signature_mismatch`, `signature_stale`,
-  `signature_header_missing`, `signature_timestamp_mismatch` or
-  `signature_header_malformed`. The reply stays a 401. The default warning
+  whose code says why, the same codes Node's and Python's
+  `SignatureVerificationError` carry: `signature_missing`,
+  `signature_malformed`, `timestamp_mismatch`, `signature_mismatch` or
+  `timestamp_out_of_tolerance`. The reply stays a 401. The default warning
   says what to check, such as SIREN_SIGNING_SECRET, the clock, or a proxy
   that drops Siren's headers. It writes five a minute and counts the rest in
   one line, with no timer.
@@ -277,11 +278,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AppRequests::sampleEventData($type)` gives a payload for each of the 60
   events Siren's `docs/api/webhooks-events.md` describes. The package ships
   them as `resources/webhook-event-samples.json`, which
-  `bin/event-samples.php` writes from that page. A test compares the two when
-  `SIREN_WEBHOOK_EVENTS` names Siren's copy.
-- `AppRequests::fromRecord($record, $key)` signs a stored request again, from
-  the row `GET /apps/requests/{id}` gives, with its own id, kind, mode,
-  question, `answerBy` and `test`.
+  `bin/event-samples.php` writes from that page by the Node SDK's rules, so
+  the three SDKs hold the same values. A test compares the file with Node's,
+  and with the page when `SIREN_CHECKOUT` names a Siren checkout.
+- `AppRequests::fromRecord($record, $key)` signs a stored request again, with
+  its own id, kind, mode, question, `answerBy` and `test`. It reads the file
+  `siren apps requests <id> --json` saves, taking the feature's key from
+  `featureKey` and the app from `appKey`, so no key needs passing. `$key` is
+  for a record with no key, such as the row `GET /apps/requests/{id}` gives
+  or a saved request whose app is gone, and a record with neither throws
+  `AppHandlerException`, as Node's and Python's `AppHandlerError`.
 - `AppRequest::$test` is true for a test request, as `siren trigger ask`
   sends one, and false when the body has no `test` field.
   `AppRequests::make()` takes `'test' => true`. The README says a handler
@@ -294,6 +300,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The README's samples that write return on a test request before they
+  write, and a test holds every writing sample to that. "Develop on your
+  machine" gives the steps that run the first time: `siren apps apply` writes
+  the key, `siren listen` writes the signing secret, and the app starts with
+  `.env.sandbox` exported. The replay sample reads a request saved with
+  `siren apps requests <id> --json`.
 - The README no longer documents `apiKeys` or `webhooks->subscriptions->create()`,
   which call `/api-keys` and `POST /webhooks`. Siren Cloud answers those with 404
   and 405, because an app owns its key and its address. The README points at
@@ -332,6 +344,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- `apiKeys` (`create()`, `list()`, `scopes()` and `revoke()`) and
+  `webhooks->subscriptions->create()` are gone, with
+  `ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ` and `WEBHOOK_SUBSCRIPTIONS_MANAGE`
+  and `ApiKeyRecordScope::WEBHOOKS_READ` and `WEBHOOKS_MANAGE`, which
+  `ApiKeyRecordScope::ALL` no longer lists. Siren serves no `/api-keys` route
+  and no `POST /webhooks`, and retired the two webhook scopes, because an app
+  owns its key and its address. Make an app with its key and address with
+  `siren apps apply`. Give an app with no key a new one with
+  `apps->createKey()`, replace it with `apps->rotateKey()` or
+  `siren apps rotate-key`, and revoke it with `apps->revokeKey()`. List the
+  scopes a key may hold with `apps->scopes()`. An address changes with the
+  app, through `siren apps apply` or Siren Cloud, since this SDK has no
+  `apps->update()`. openapi.yaml drops the removed operations and lists the
+  app key routes. The other `/webhooks` routes take a signed-in session
+  only.
 - Each kind's PHPStan types are named for the kind: the kind in PascalCase,
   then `Tell`, `Question` or `Answer`, the same names in the three SDKs.
   `AppConversionTell` is now `PostConversionActionTell`, `AppAllocationTell`

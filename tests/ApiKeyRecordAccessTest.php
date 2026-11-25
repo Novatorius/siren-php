@@ -52,20 +52,6 @@ final class ApiKeyRecordAccessTest extends TestCase
         $this->assertSame('Bearer ' . self::API_KEY, $this->sent()->getHeader('Authorization'));
     }
 
-    public function testAKeyManagesWebhookSubscriptions(): void
-    {
-        $siren = $this->hostSiren([
-            self::hostJson(201, ['id' => 4, 'signingSecret' => 'whsec_x']),
-            self::hostJson(200, [['id' => 4]]),
-        ]);
-
-        $siren->webhooks->subscriptions->create(['targetUrl' => 'https://example.com/hook', 'events' => ['*']]);
-        $this->assertSame('POST', $this->sent()->getMethod());
-        $this->assertSame('Bearer ' . self::API_KEY, $this->sent()->getHeader('Authorization'));
-
-        $this->assertSame([['id' => 4]], $siren->webhooks->subscriptions->list());
-    }
-
     public function testAMissingLedgerScopeNamesEveryScopeThatOpensTheRoute(): void
     {
         $siren = $this->hostSiren([self::coded(403, "This API key does not have the 'webhook-subscriptions:read' scope.", ErrorCode::MISSING_SCOPE, [
@@ -138,7 +124,7 @@ final class ApiKeyRecordAccessTest extends TestCase
 
         $this->expectException(ApiKeyNotAcceptedException::class);
 
-        $siren->apiKeys->list();
+        $siren->apps->scopes();
     }
 
     public function testAPlain401StaysAnAuthenticationException(): void

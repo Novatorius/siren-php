@@ -224,7 +224,7 @@ final class AppRequestDxPass4Test extends TestCase
             ],
             'an old time' => [
                 static fn (): SignedRequest => AppRequests::make('postConversionAction', 'tell-the-crm', ['secret' => self::SECRET, 'timestamp' => time() - 600]),
-                'signature_stale',
+                'timestamp_out_of_tolerance',
                 "Siren request handler: the request's signed time is more than 300 seconds from this machine's clock. Check the clock.",
             ],
             'no V2 header' => [
@@ -235,7 +235,7 @@ final class AppRequestDxPass4Test extends TestCase
 
                     return new SignedRequest('POST', $headers, $request->rawBody);
                 },
-                'signature_header_missing',
+                'signature_missing',
                 "Siren request handler: the request has no X-Siren-Signature-V2 header. Check that a proxy passes Siren's X-Siren-* headers through.",
             ],
             'a timestamp header that differs' => [
@@ -244,7 +244,7 @@ final class AppRequestDxPass4Test extends TestCase
 
                     return new SignedRequest('POST', ['X-Siren-Timestamp' => '1'] + $request->headers, $request->rawBody);
                 },
-                'signature_timestamp_mismatch',
+                'timestamp_mismatch',
                 "Siren request handler: the X-Siren-Timestamp header differs from the time X-Siren-Signature-V2 signed. Check that a proxy passes Siren's X-Siren-* headers through unchanged.",
             ],
         ];
@@ -466,7 +466,7 @@ final class AppRequestDxPass4Test extends TestCase
         $samples = json_decode((string) file_get_contents(dirname(__DIR__) . '/resources/webhook-event-samples.json'), true, 512, JSON_THROW_ON_ERROR);
 
         $this->assertCount(60, $samples['events']);
-        $this->assertSame(['payoutId' => 101, 'collaboratorId' => 102, 'value' => 25.5, 'currency' => 'USD'], $samples['events']['payout.paid']);
+        $this->assertSame(['payoutId' => 101, 'collaboratorId' => 102, 'value' => 25, 'currency' => 'example'], $samples['events']['payout.paid']);
 
         foreach ($samples['events'] as $type => $data) {
             $this->assertMatchesRegularExpression('/^[a-z_]+\.[a-z_]+$/', $type);
@@ -478,13 +478,13 @@ final class AppRequestDxPass4Test extends TestCase
 
     public function testTheSamplesMatchSirensEventDocs(): void
     {
-        $docs = getenv('SIREN_WEBHOOK_EVENTS');
+        $checkout = getenv('SIREN_CHECKOUT');
 
-        if (!is_string($docs) || $docs === '') {
-            $this->markTestSkipped("Set SIREN_WEBHOOK_EVENTS to the path of Siren's docs/api/webhooks-events.md to compare the samples with it.");
+        if (!is_string($checkout) || $checkout === '') {
+            $this->markTestSkipped("Set SIREN_CHECKOUT to a Siren checkout to compare the samples with its docs/api/webhooks-events.md.");
         }
 
-        $command = [PHP_BINARY, dirname(__DIR__) . '/bin/event-samples.php', '--check', $docs];
+        $command = [PHP_BINARY, dirname(__DIR__) . '/bin/event-samples.php', '--check', $checkout];
         $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
         $this->assertIsResource($process);
         fclose($pipes[0]);
@@ -566,7 +566,7 @@ final class AppRequestDxPass4Test extends TestCase
 
     public function testFromRecordWithNoKeySaysWhereToFindIt(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(\Siren\Sdk\Exception\AppHandlerException::class);
         $this->expectExceptionMessage("The record names its feature as app:31, without the feature's key. Pass the key, such as AppRequests::fromRecord(\$record, 'split-by-score'). `siren apps show <app>` lists each feature's key.");
 
         AppRequests::fromRecord(self::record(), null, ['secret' => self::SECRET]);
@@ -695,7 +695,7 @@ final class AppRequestDxPass4Test extends TestCase
 
         $this->assertStringContainsString("\n## Develop on your machine\n", $readme);
         $section = self::section($readme, 'Develop on your machine');
-        $this->assertStringContainsString('siren listen --forward-to localhost:8000/siren', $section);
+        $this->assertStringContainsString('siren listen --forward-to localhost:3000/siren', $section);
         $this->assertStringContainsString('siren trigger ask <app> <feature>', $section);
         $this->assertStringContainsString('npx @novatorius/siren', $section);
         $this->assertStringContainsString('sk_test_', $section);
@@ -713,6 +713,12 @@ final class AppRequestDxPass4Test extends TestCase
         try {
             foreach (['replay-a-request' => 'ReplayTest.php', 'test-an-event' => 'ConversionApprovedTest.php'] as $name => $file) {
                 file_put_contents($dir . '/' . $file, self::readme($name));
+
+                if ($name === 'replay-a-request') {
+                    $this->assertSame(1, preg_match('/<!-- readme-test: replay-record -->\n```json\n(.*?)\n```/s', (string) file_get_contents(dirname(__DIR__) . '/README.md'), $record));
+                    file_put_contents($dir . '/request.json', $record[1]);
+                }
+
                 $command = [PHP_BINARY, dirname(__DIR__) . '/vendor/bin/phpunit', '--no-configuration', '--bootstrap', dirname(__DIR__) . '/vendor/autoload.php', $dir . '/' . $file];
                 $env = getenv();
                 unset($env['SIREN_API_KEY'], $env['SIREN_SIGNING_SECRET']);

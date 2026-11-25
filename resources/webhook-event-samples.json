@@ -1,11 +1,11 @@
 {
-    "source": "Siren's docs/api/webhooks-events.md, by bin/event-samples.php. Each field holds a sample value of the type the page gives it.",
+    "source": "Siren's docs/api/webhooks-events.md, by bin/event-samples.php, which follows the Node SDK's scripts/siren-event-samples.mjs. Each field holds a sample value of the type the page gives it.",
     "events": {
         "sale.created": {
             "opportunityId": 101,
             "attributed": true,
             "source": "stripe",
-            "bindingId": "sample-bindingId"
+            "bindingId": "example"
         },
         "lead.created": {
             "conversionId": 101
@@ -20,13 +20,13 @@
             "collaboratorId": 101,
             "source": "siren_rest_api",
             "programIds": [
-                103
+                102
             ],
             "distributorIds": [
-                104
+                103
             ],
             "groupIds": [
-                105
+                104
             ],
             "approveOnSignup": true
         },
@@ -72,8 +72,8 @@
         "collaborator_group.updated": {
             "groupId": 101,
             "changed": "name",
-            "previous": "sample-previous",
-            "current": "sample-current"
+            "previous": "example",
+            "current": "example"
         },
         "collaborator_group.deleted": {
             "groupId": 101
@@ -121,15 +121,15 @@
             "conversionIds": [
                 101
             ],
-            "conversionCount": 102,
-            "transactionId": 103,
-            "programId": 104,
-            "opportunityId": 105,
+            "conversionCount": 1,
+            "transactionId": 102,
+            "programId": 103,
+            "opportunityId": 104,
             "conversionType": "sale",
             "incentiveType": "saleTransactionPercentage",
             "incentiveResolverType": "newestBindingWins",
-            "incentiveTypeName": "sample-incentiveTypeName",
-            "incentiveResolverTypeName": "sample-incentiveResolverTypeName"
+            "incentiveTypeName": "Percentage of Transaction",
+            "incentiveResolverTypeName": "Newest engagement wins"
         },
         "conversion.approved": {
             "conversionId": 101
@@ -141,29 +141,29 @@
             "conversionIds": [
                 101
             ],
-            "conversionCount": 102,
-            "transactionId": 103,
-            "programId": 104,
+            "conversionCount": 1,
+            "transactionId": 102,
+            "programId": 103,
             "conversionType": "renewal",
-            "incentiveType": "sample-incentiveType",
-            "incentiveResolverType": "sample-incentiveResolverType",
-            "incentiveTypeName": "sample-incentiveTypeName",
-            "incentiveResolverTypeName": "sample-incentiveResolverTypeName"
+            "incentiveType": "example",
+            "incentiveResolverType": "example",
+            "incentiveTypeName": "example",
+            "incentiveResolverTypeName": "example"
         },
         "engagement.created": {
-            "engagementCount": 101,
-            "strategyId": "sample-strategyId",
+            "engagementCount": 1,
+            "strategyId": "example",
             "engagementIds": [
-                103
+                101
             ]
         },
         "engagement.awarded": {
             "engagementId": 101,
             "transactionId": 102,
-            "incentiveType": "sample-incentiveType",
-            "incentiveResolverType": "sample-incentiveResolverType",
-            "incentiveTypeName": "sample-incentiveTypeName",
-            "incentiveResolverTypeName": "sample-incentiveResolverTypeName"
+            "incentiveType": "example",
+            "incentiveResolverType": "example",
+            "incentiveTypeName": "example",
+            "incentiveResolverTypeName": "example"
         },
         "engagement.completed": {
             "engagementId": 101
@@ -185,24 +185,24 @@
         "obligation.approved": {
             "obligationId": 101,
             "collaboratorId": 102,
-            "value": 103,
+            "value": 1,
             "awardType": "USD",
             "previousStatus": "draft"
         },
         "obligation.rejected": {
             "obligationId": 101,
             "collaboratorId": 102,
-            "value": 103,
-            "awardType": "sample-awardType",
+            "value": 1,
+            "awardType": "example",
             "previousStatus": "draft"
         },
         "obligation.superseded": {
             "obligationId": 101,
-            "supersededBy": 102,
-            "transactionId": 103,
-            "conversionId": 104,
+            "supersededBy": 1,
+            "transactionId": 102,
+            "conversionId": 103,
             "reason": "refund",
-            "changeReference": "sample-changeReference"
+            "changeReference": "example"
         },
         "transaction.created": {
             "transactionId": 101
@@ -212,37 +212,37 @@
         },
         "fulfillment.created": {
             "fulfillmentId": 101,
-            "status": "sample-status"
+            "status": "example"
         },
         "fulfillment.updated": {
             "fulfillmentId": 101,
-            "status": "sample-status"
+            "status": "example"
         },
         "payout.created": {
             "payoutId": 101,
             "collaboratorId": 102,
-            "value": 25.5,
+            "value": 25,
             "currency": "USD",
-            "status": "sample-status"
+            "status": "example"
         },
         "payout.paid": {
             "payoutId": 101,
             "collaboratorId": 102,
-            "value": 25.5,
-            "currency": "USD"
+            "value": 25,
+            "currency": "example"
         },
         "payout.failed": {
             "payoutId": 101,
             "collaboratorId": 102,
-            "value": 25.5,
-            "currency": "USD",
-            "failureReason": "sample-failureReason"
+            "value": 25,
+            "currency": "example",
+            "failureReason": "example"
         },
         "payout.waiting": {
             "payoutId": 101,
             "collaboratorId": 102,
-            "value": 25.5,
-            "currency": "USD",
+            "value": 25,
+            "currency": "example",
             "waitingReason": "stripe_account_missing"
         },
         "distribution.completed": {
@@ -265,11 +265,11 @@
             "refundId": "siren-refund-",
             "refundIdFromPlatform": true,
             "source": "shopify",
-            "amount": 105,
-            "currency": "USD",
+            "amount": 1,
+            "currency": "example",
             "whole": true,
-            "remainingValue": 108,
-            "refundedAt": "2026-11-24T17:00:00+00:00",
+            "remainingValue": 1,
+            "refundedAt": "example",
             "lines": []
         },
         "product.merged": {
@@ -285,20 +285,12 @@
             ]
         },
         "coupon.linked": {
-            "code": "sample-code",
+            "code": "example",
             "source": "shopify",
             "sourceLabel": "Shopify",
-            "collaboratorId": 104,
-            "propertyId": 105,
-            "couponId": 106
-        },
-        "coupon.unlinked": {
-            "code": "sample-code",
-            "source": "shopify",
-            "sourceLabel": "Shopify",
-            "collaboratorId": 104,
-            "propertyId": 105,
-            "couponId": 106
+            "collaboratorId": 101,
+            "propertyId": 102,
+            "couponId": 103
         },
         "coupon.merged": {
             "couponId": 101,
@@ -314,6 +306,14 @@
             "source": "stripe",
             "sourceLabel": "Stripe",
             "mode": "live"
+        },
+        "coupon.unlinked": {
+            "code": "example",
+            "source": "shopify",
+            "sourceLabel": "Shopify",
+            "collaboratorId": 101,
+            "propertyId": 102,
+            "couponId": 103
         },
         "store.disconnected": {
             "propertyId": 101,

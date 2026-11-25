@@ -44,6 +44,9 @@ $siren = new Siren();         // the app's key, from SIREN_API_KEY
 
 $siren->apps->requestHandler() // the signing secret, from SIREN_SIGNING_SECRET
     ->on('postConversionAction', 'tell-the-crm', function ($request) {
+        if ($request->test) {
+            return; // a test from `siren trigger`: write nothing
+        }
         // Siren may send it twice, so add it once, keyed by $request->id.
         addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
     })
@@ -53,6 +56,9 @@ PHP;
     /** Section 5.2. Only the function changes from 5.1. */
     private const NOTE_THE_SHARE = <<<'PHP'
     ->on('postAllocationAction', 'note-the-share', function ($request) {
+        if ($request->test) {
+            return; // a test from `siren trigger`: write nothing
+        }
         // Siren may send it twice, so note it once, keyed by $request->id.
         noteShare($request->id, $request->data['allocation']);
     })
@@ -259,6 +265,9 @@ PHP;
     {
         $tell = <<<'PHP'
     ->on('postConversionAction', 'tell-the-crm', function ($request) {
+        if ($request->test) {
+            return; // a test from `siren trigger`: write nothing
+        }
         // Siren may send it twice, so add it once, keyed by $request->id.
         addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
     })
@@ -350,6 +359,16 @@ PHP;
         $this->assertSame([200, '{}'], [$status, $body]);
         $this->assertSame([['noteShare', [$request['id'], $request['data']['allocation']]]], self::lines(self::$stubLog));
         $this->assertSame([], self::lines(self::$sirenLog));
+    }
+
+    public function testTheTellSamplesWriteNothingOnATestRequest(): void
+    {
+        foreach (['tell-the-crm' => 'postConversionAction', 'note-the-share' => 'postAllocationAction'] as $file => $kind) {
+            [$status, $body] = self::send($file, $kind, true);
+
+            $this->assertSame([200, '{}'], [$status, $body], $file);
+            $this->assertSame([], self::lines(self::$stubLog), $file . ' writes nothing on a test request.');
+        }
     }
 
     /**

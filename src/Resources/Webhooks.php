@@ -40,7 +40,7 @@ final class Webhooks
      * HMAC will not match. `$signatureHeader` is the value of the
      * `X-Siren-Signature` header (`sha256=<hex>`).
      *
-     * A subscription made with `subscriptions->create()` receives the event
+     * An app's address receives the event
      * payload itself as the body, and Siren names the event in the
      * `X-Siren-Event` header and the delivery in `X-Siren-Delivery`. Pass
      * those two headers as `$eventType` and `$deliveryId`, or use

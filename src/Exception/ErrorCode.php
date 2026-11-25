@@ -28,7 +28,7 @@ final class ErrorCode
     public const MISSING_SCOPE = 'missing_scope';
 
     /**
-     * 401: the route does not accept an API key, such as every `/api-keys`
+     * 401: the route does not accept an API key, such as every `/apps`
      * route. It takes a signed-in dashboard session. A
      * {@see ApiKeyNotAcceptedException}.
      */

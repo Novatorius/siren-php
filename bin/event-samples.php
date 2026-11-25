@@ -4,37 +4,59 @@ declare(strict_types=1);
 
 /*
  * Writes resources/webhook-event-samples.json, the sample payload of each
- * webhook event, from Siren's own event catalog page, docs/api/webhooks-events.md.
- * Siren\Sdk\Testing\AppRequests::event() and sampleEventData() read it.
+ * webhook event, from Siren's own event reference, docs/api/webhooks-events.md
+ * in a Siren checkout. Siren\Sdk\Testing\AppRequests::event() and
+ * sampleEventData() read it.
  *
- * Each event's "Payload" table names its fields and their types, and this
- * fills each field with a sample value of that type: a number for an id, the
- * first example the description gives for a string (such as `stripe`), and
- * so on. An event whose payload is "the same fields as" another copies that
- * one's sample.
+ * It follows the Node SDK's scripts/siren-event-samples.mjs rule for rule,
+ * so the three SDKs hold the same values. Each `### <event>` heading's
+ * `| Field | Type | Description |` table gives one field per row:
  *
- *     php bin/event-samples.php <siren>/docs/api/webhooks-events.md          rewrites the file
- *     php bin/event-samples.php --check <siren>/docs/api/webhooks-events.md  exits 1 when it has drifted
+ * - `integer`, `integer or null`: 101, 102 and on for a field named `...Id`,
+ *   in the table's order, and 1 for any other.
+ * - `integer[]`: a list holding the next id.
+ * - `number`: 25.
+ * - `boolean`: true.
+ * - `string`, `string or null`: the first quoted value the description shows
+ *   in backticks (`"stripe"`), else the first other backticked word that is
+ *   not a field of the table, `null`, `true` or `false`, else "example".
+ * - `array`: an empty list.
+ *
+ * An event whose payload reads "the same fields as `<event>`" gets a copy of
+ * that event's sample. An event with no table gets none.
+ *
+ *     php bin/event-samples.php <siren checkout>          rewrites the file
+ *     php bin/event-samples.php --check <siren checkout>  exits 1 when it has drifted
+ *     php bin/event-samples.php --print <siren checkout>  prints the samples as JSON
  */
 
-$args = array_slice($argv, 1);
-$check = in_array('--check', $args, true);
-$args = array_values(array_filter($args, static fn (string $arg): bool => $arg !== '--check'));
+const DOC = 'docs/api/webhooks-events.md';
 
-if (count($args) !== 1 || !is_file($args[0])) {
-    fwrite(STDERR, "Usage: php bin/event-samples.php [--check] <siren>/docs/api/webhooks-events.md\n");
+$args = array_slice($argv, 1);
+$flags = array_values(array_filter($args, static fn (string $arg): bool => str_starts_with($arg, '--')));
+$args = array_values(array_filter($args, static fn (string $arg): bool => !str_starts_with($arg, '--')));
+
+if (count($args) !== 1 || !is_file($args[0] . '/' . DOC) || array_diff($flags, ['--check', '--print']) !== [] || count($flags) > 1) {
+    fwrite(STDERR, "Usage: php bin/event-samples.php [--check | --print] <siren checkout>\n");
     exit(2);
+}
+
+$samples = samples((string) file_get_contents($args[0] . '/' . DOC));
+
+if ($flags === ['--print']) {
+    echo json_encode($samples, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), "\n";
+    exit(0);
 }
 
 $target = dirname(__DIR__) . '/resources/webhook-event-samples.json';
 $json = json_encode([
-    'source' => "Siren's docs/api/webhooks-events.md, by bin/event-samples.php. Each field holds a sample value of the type the page gives it.",
-    'events' => samples((string) file_get_contents($args[0])),
+    'source' => "Siren's docs/api/webhooks-events.md, by bin/event-samples.php, which follows the Node SDK's scripts/siren-event-samples.mjs. Each field holds a sample value of the type the page gives it.",
+    'events' => $samples,
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";
 
-if ($check) {
+if ($flags === ['--check']) {
     if (!is_file($target) || file_get_contents($target) !== $json) {
-        fwrite(STDERR, "resources/webhook-event-samples.json differs from what Siren's page gives. Run php bin/event-samples.php <page> to write it again.\n");
+        fwrite(STDERR, "resources/webhook-event-samples.json differs from what Siren's page gives. Run php bin/event-samples.php <siren checkout> to write it again.\n");
         exit(1);
     }
 
@@ -48,79 +70,91 @@ echo 'Wrote ' . $target . "\n";
 /**
  * @return array<string, array<string, mixed>>
  */
-function samples(string $page): array
+function samples(string $markdown): array
 {
-    $events = [];
-    $sameAs = [];
-    $event = null;
+    $samples = [];
+    $same = [];
+    $lines = explode("\n", $markdown);
+    $count = count($lines);
 
-    foreach (explode("\n", $page) as $line) {
-        if (preg_match('/^### ([a-z_]+\.[a-z_]+)\s*$/', $line, $m) === 1) {
-            $event = $m[1];
-            $events[$event] = [];
-
+    for ($i = 0; $i < $count; $i++) {
+        if (preg_match('/^### ([a-z_]+\.[a-z_]+)\s*$/', $lines[$i], $heading) !== 1) {
             continue;
         }
 
-        if (str_starts_with($line, '## ') || str_starts_with($line, '### ')) {
-            $event = null;
+        $event = $heading[1];
+        $j = $i + 1;
 
+        while ($j < $count && !str_starts_with($lines[$j], '### ') && !str_starts_with($lines[$j], '## ') && preg_match('/^\|\s*Field\s*\|\s*Type\s*\|/', $lines[$j]) !== 1) {
+            if (preg_match('/^\*\*Payload:\*\* the same fields as `([a-z_]+\.[a-z_]+)`/', $lines[$j], $copy) === 1) {
+                $same[] = [$event, $copy[1]];
+            }
+
+            $j++;
+        }
+
+        if ($j >= $count || !str_starts_with($lines[$j], '|')) {
             continue;
         }
 
-        if ($event === null) {
-            continue;
+        $rows = [];
+
+        for ($j += 2; $j < $count && str_starts_with($lines[$j], '|'); $j++) {
+            $cells = array_map('trim', array_slice(explode('|', $lines[$j]), 1, -1));
+
+            if (preg_match('/^`([A-Za-z0-9_]+)`$/', $cells[0] ?? '', $name) !== 1) {
+                continue;
+            }
+
+            $rows[] = ['name' => $name[1], 'type' => $cells[1] ?? '', 'description' => implode('|', array_slice($cells, 2))];
         }
 
-        if (preg_match('/^\*\*Payload:\*\* the same fields as `([a-z_]+\.[a-z_]+)`/', $line, $m) === 1) {
-            $sameAs[$event] = $m[1];
+        $fields = array_column($rows, 'name');
+        $data = [];
+        $nextId = 101;
 
-            continue;
+        foreach ($rows as ['name' => $name, 'type' => $type, 'description' => $description]) {
+            $data[$name] = match (preg_replace('/ or null$/', '', $type)) {
+                'integer' => str_ends_with($name, 'Id') ? $nextId++ : 1,
+                'integer[]' => [$nextId++],
+                'number' => 25,
+                'boolean' => true,
+                'array' => [],
+                'string' => stringSample($description, $fields),
+                default => throw new RuntimeException(sprintf('%s: %s.%s has a type this script does not know: %s', DOC, $event, $name, $type)),
+            };
         }
 
-        if (preg_match('/^\| `([A-Za-z0-9_]+)` \| ([^|]+) \| (.*) \|\s*$/', $line, $m) === 1) {
-            $events[$event][$m[1]] = value($m[1], trim($m[2]), $m[3], count($events[$event]));
-        }
+        $samples[$event] = $data;
     }
 
-    foreach ($sameAs as $event => $other) {
-        $events[$event] = $events[$other] ?? throw new RuntimeException(sprintf('%s has the same fields as %s, which the page does not describe.', $event, $other));
+    foreach ($same as [$event, $from]) {
+        $samples[$event] = $samples[$from] ?? throw new RuntimeException(sprintf('%s: %s copies %s, which has no table', DOC, $event, $from));
     }
 
-    foreach ($events as $name => $fields) {
-        if ($fields === []) {
-            throw new RuntimeException(sprintf('The page gives %s no payload fields.', $name));
-        }
+    if ($samples === []) {
+        throw new RuntimeException(DOC . ': no events found');
     }
 
-    return $events;
+    return $samples;
 }
 
-function value(string $field, string $type, string $description, int $position): mixed
+/** @param list<string> $fields */
+function stringSample(string $description, array $fields): string
 {
-    $number = 101 + $position;
+    preg_match_all('/`([^`]+)`/', $description, $matches);
 
-    return match (preg_replace('/ or null$/', '', $type)) {
-        'integer' => $number,
-        'integer[]' => [$number],
-        'number' => 25.5,
-        'boolean' => true,
-        'array' => [],
-        'string' => text($field, $description),
-        default => throw new RuntimeException(sprintf('%s has the type %s, which this script does not fill.', $field, $type)),
-    };
-}
-
-/** The first example the description quotes, such as `stripe`, or a sample built from the field's name. */
-function text(string $field, string $description): string
-{
-    if (preg_match('/`"?([A-Za-z0-9_.\-]+)"?`/', $description, $m) === 1) {
-        return $m[1];
+    foreach ($matches[1] as $value) {
+        if (preg_match('/^"[^"]*"$/', $value) === 1) {
+            return substr($value, 1, -1);
+        }
     }
 
-    return match (true) {
-        str_ends_with($field, 'At') => '2026-11-24T17:00:00+00:00',
-        strtolower($field) === 'currency' => 'USD',
-        default => 'sample-' . $field,
-    };
+    foreach ($matches[1] as $value) {
+        if (preg_match('/^[a-z0-9_.-]+$/i', $value) === 1 && !in_array($value, $fields, true) && !in_array($value, ['null', 'true', 'false'], true)) {
+            return $value;
+        }
+    }
+
+    return 'example';
 }

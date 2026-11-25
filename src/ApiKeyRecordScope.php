@@ -12,20 +12,17 @@ namespace Siren\Sdk;
  *
  * - The `ledger:` scopes only read what Siren recorded. No scope approves a
  *   reward, moves an obligation along or sends a payout.
- * - {@see WEBHOOKS_READ} and {@see WEBHOOKS_MANAGE} read and manage webhook
- *   subscriptions. They are the same strings as
- *   {@see ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ} and
- *   {@see ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE}.
  * - The `records:` scopes read and manage the records a merchant sets up.
  *   A manage scope reads everything its read scope reads.
  *
  * Siren grants each only by its exact name. `*` and wildcards such as
  * `records:*` grant none of them. A test loads Siren's
- * ApiKeyRecordScopes.php and fails when this list differs from it.
+ * ApiKeyRecordScopes.php and fails when this list differs from the scopes
+ * it offers. Siren retired the two webhook scopes, and no constant here
+ * names them.
  *
  * ```php
- * $siren->apiKeys->create([
- *     'label'  => 'Payout app',
+ * $app = $siren->apps->createKey('payout-app', [
  *     'scopes' => [ApiKeyRecordScope::PAYOUTS_READ, ApiKeyRecordScope::FULFILLMENTS_READ],
  * ]);
  * ```
@@ -46,10 +43,6 @@ final class ApiKeyRecordScope
     public const FULFILLMENTS_READ = 'ledger:fulfillments:read';
     /** `payouts->list()` and `retrieve()`. Organization keys only. */
     public const PAYOUTS_READ = 'ledger:payouts:read';
-    /** Lists and reads webhook subscriptions, the event catalog and deliveries. Organization keys only. */
-    public const WEBHOOKS_READ = 'webhook-subscriptions:read';
-    /** Everything {@see WEBHOOKS_READ} opens, plus create, update, delete and test. Organization keys only. */
-    public const WEBHOOKS_MANAGE = 'webhook-subscriptions:manage';
     public const PRODUCTS_READ = 'records:products:read';
     public const PRODUCTS_MANAGE = 'records:products:manage';
     public const COUPONS_READ = 'records:coupons:read';
@@ -85,8 +78,6 @@ final class ApiKeyRecordScope
         self::OBLIGATIONS_READ,
         self::FULFILLMENTS_READ,
         self::PAYOUTS_READ,
-        self::WEBHOOKS_READ,
-        self::WEBHOOKS_MANAGE,
         self::PRODUCTS_READ,
         self::PRODUCTS_MANAGE,
         self::COUPONS_READ,

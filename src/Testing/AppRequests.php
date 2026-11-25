@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Siren\Sdk\Testing;
 
+use Siren\Sdk\Exception\AppHandlerException;
 use Siren\Sdk\Resources\Apps;
 use Siren\Sdk\Siren;
 
@@ -70,14 +71,16 @@ final class AppRequests
      * wrong becomes a test case: its id, kind, mode, question, `answerBy`
      * and `test` are the record's own.
      *
-     * `$record` is the request as `GET /apps/requests/{id}` gives it, which
-     * is the record `siren apps requests <id>` shows, as an array or its
-     * JSON text. That record names its feature as `app:12`, without the
-     * feature's key, so pass the key, which `siren apps show <app>` lists. A
-     * record that holds the key, as `feature.key` or `featureKey`, needs none.
+     * `$record` is the file `siren apps requests <id> --json > request.json`
+     * saves, as an array or its JSON text. It holds Siren's request with
+     * `appKey` and `featureKey` beside it, so no key needs passing. A row
+     * `GET /apps/requests/{id}` gives names its feature only as `app:12`, so
+     * pass the key with it, which `siren apps show <app>` lists. `$key` is
+     * used only when the record holds no key, such as a saved request whose
+     * app is gone, where `featureKey` is null.
      *
      * ```php
-     * $request = AppRequests::fromRecord(file_get_contents('tests/fixtures/apr_9c60.json'), 'split-by-score');
+     * $request = AppRequests::fromRecord(file_get_contents(__DIR__ . '/request.json'));
      * $result = $answers->simulate($request);
      * ```
      *
@@ -86,7 +89,8 @@ final class AppRequests
      * @param array<string, mixed>|string $record
      * @param array{secret?: string, app?: string, baseUrl?: string, timestamp?: int} $options
      *
-     * @throws \InvalidArgumentException For a record that is not a request, a record with no key and no `$key`, or no secret.
+     * @throws \InvalidArgumentException For a record that is not a request, or no secret.
+     * @throws AppHandlerException For a record that names no feature key when `$key` is not given, as Node's and Python's `AppHandlerError`.
      */
     public static function fromRecord(array|string $record, ?string $key = null, array $options = []): SignedRequest
     {
@@ -117,9 +121,10 @@ final class AppRequests
         $key = is_string($held) && $held !== '' ? $held : $key;
 
         if ($key === null || $key === '') {
-            throw new \InvalidArgumentException(sprintf(
-                "The record names its feature as %s, without the feature's key. Pass the key, such as AppRequests::fromRecord(\$record, 'split-by-score'). `siren apps show <app>` lists each feature's key.",
+            throw new AppHandlerException(sprintf(
+                "The record names its feature as %s, without the feature's key.%s Pass the key, such as AppRequests::fromRecord(\$record, 'split-by-score'). `siren apps show <app>` lists each feature's key.",
                 $featureId,
+                array_key_exists('featureKey', $record) && $record['featureKey'] === null ? ' Its featureKey is null, as `siren apps requests <id> --json` saves it when the app is gone.' : '',
             ));
         }
 
@@ -129,7 +134,7 @@ final class AppRequests
         $data = $record['data'];
         $body = self::envelope((string) $record['kind'], $key, [
             'id' => (string) $record['id'],
-            'app' => $options['app'] ?? (is_string($record['app'] ?? null) ? $record['app'] : self::DEFAULT_APP),
+            'app' => $options['app'] ?? (is_string($record['app'] ?? null) ? $record['app'] : (is_string($record['appKey'] ?? null) ? $record['appKey'] : self::DEFAULT_APP)),
             'baseUrl' => $options['baseUrl'] ?? null,
             'data' => $data,
             'test' => ($record['test'] ?? false) === true,

@@ -119,6 +119,9 @@ $siren = new Siren();         // the app's key, from SIREN_API_KEY
 
 $siren->apps->requestHandler() // the signing secret, from SIREN_SIGNING_SECRET
     ->on('postConversionAction', 'tell-the-crm', function ($request) {
+        if ($request->test) {
+            return; // a test from `siren trigger`: write nothing
+        }
         // Siren may send it twice, so add it once, keyed by $request->id.
         addToCrm($request->id, $request->data['conversion'], $request->data['reward']);
     })
@@ -186,15 +189,30 @@ client.
 it. `make()` takes `'test' => true` to build one. Siren checks a test ask's
 answer with the kind's own rules and applies nothing, so a handler must
 never move money or write records on a test request. Answer it as usual, so
-Siren checks the answer, and stop there. The payout method sample answers
-`failed`, the one answer that pays nothing.
+Siren checks the answer, and stop there. Each sample here that writes reads
+`$request->test` first: the tells return before they write, and the payout
+method sample answers `failed`, the one answer that pays nothing.
 
-A stored request becomes a test case in one line.
-`AppRequests::fromRecord($record, $key)` signs it again with its own id,
-kind, mode, question, `answerBy` and `test`. `$record` is the request as
-`siren apps requests <id>` shows it, the row `GET /apps/requests/{id}` gives,
-as an array or its JSON text. That row names the feature as `app:31`,
-without its key, so pass the key, which `siren apps show <app>` lists:
+A request Siren sent becomes a test case. Save it with
+`siren apps requests <id> --json > request.json`, which arrives with the
+CLI's next release. The file holds Siren's request with its app's and
+feature's keys, `appKey` and `featureKey`, beside it:
+
+<!-- readme-test: replay-record -->
+```json
+{"id": "apr_0123456789abcdef0123456789abcdef", "appId": 12, "feature": "app:31", "kind": "distributionResolver",
+ "mode": "ask", "status": "needs_attention", "sendCount": 3, "answerBy": "2026-11-24T18:00:00+00:00",
+ "data": {"distribution": {"id": 21, "distributorId": 2, "periodStart": "2026-10-01T00:00:00+00:00", "periodEnd": "2026-11-01T00:00:00+00:00"},
+          "distributor": {"id": 2, "name": "Partner pool"},
+          "pool": {"value": 10000, "total": 10000, "paid": 0, "units": "USD", "currency": {"id": "USD", "symbol": "$",
+                   "position": "before", "name": "US Dollar", "scale": 2, "decimalPlaces": 2, "type": "monetary"}},
+          "metrics": [{"metricId": 41, "collaboratorId": 42, "score": 30, "triggerCount": 3},
+                      {"metricId": 43, "collaboratorId": 57, "score": 20, "triggerCount": 2}]},
+ "answer": null, "appKey": "acme-crm", "featureKey": "split-by-score", "sends": []}
+```
+
+`AppRequests::fromRecord()` reads that file and signs the request again
+with its own id, kind, mode, question, `answerBy` and `test`:
 
 <!-- readme-test: replay-a-request -->
 ```php
@@ -207,18 +225,6 @@ final class ReplayTest extends TestCase
 {
     public function testTheStuckRequestGetsAnAnswerSirenTakes(): void
     {
-        // The request as `siren apps requests apr_0123...` showed it.
-        $record = <<<'JSON'
-        {"id": "apr_0123456789abcdef0123456789abcdef", "feature": "app:31", "kind": "distributionResolver",
-         "mode": "ask", "status": "needs_attention", "answerBy": "2026-11-24T18:00:00+00:00",
-         "data": {"distribution": {"id": 21, "distributorId": 2, "periodStart": "2026-10-01T00:00:00+00:00", "periodEnd": "2026-11-01T00:00:00+00:00"},
-                  "distributor": {"id": 2, "name": "Partner pool"},
-                  "pool": {"value": 10000, "total": 10000, "paid": 0, "units": "USD", "currency": {"id": "USD", "symbol": "$",
-                           "position": "before", "name": "US Dollar", "scale": 2, "decimalPlaces": 2, "type": "monetary"}},
-                  "metrics": [{"metricId": 41, "collaboratorId": 42, "score": 30, "triggerCount": 3},
-                              {"metricId": 43, "collaboratorId": 57, "score": 20, "triggerCount": 2}]}}
-        JSON;
-
         $siren = new Siren(['apiKey' => 'sk_test_unused']); // simulate() posts nothing
         $answers = $siren->apps->requestHandler('test-secret')
             ->on('distributionResolver', 'split-by-score', fn ($request) => [
@@ -227,7 +233,9 @@ final class ReplayTest extends TestCase
                 'shares' => $siren->apps->splitPool($request->data['pool'], array_column($request->data['metrics'], 'score', 'metricId')),
             ]);
 
-        $result = $answers->simulate(AppRequests::fromRecord($record, 'split-by-score', ['secret' => 'test-secret']));
+        // Saved with `siren apps requests apr_0123... --json > request.json`.
+        $request = AppRequests::fromRecord(file_get_contents(__DIR__ . '/request.json'), options: ['secret' => 'test-secret']);
+        $result = $answers->simulate($request);
 
         $this->assertNull($result->error);
         $this->assertSame(['41' => 6000, '43' => 4000], $result->answer['shares']);
@@ -235,26 +243,47 @@ final class ReplayTest extends TestCase
 }
 ```
 
+When the app is gone, `featureKey` is null, so pass the feature's key as
+the second argument, such as `fromRecord($record, 'split-by-score')`.
+`fromRecord()` also takes the row an admin's session reads with
+`apps->requests->retrieve()`, which names the feature only as `app:31`, with
+the key passed the same way. A record with no key and none passed throws
+`AppHandlerException`.
+
 ## Develop on your machine
 
 Siren can send real requests to the handler on your laptop, with no tunnel.
-It works with a sandbox Siren only.
+It works with a sandbox Siren only, and takes three terminals.
 
-1. Use a sandbox key, one that starts with `sk_test_`. On a sandbox,
-   `siren apps apply` needs no address for the app, and it writes the app's
-   key and signing secret to `.env.sandbox`.
-2. Run your app, such as `php -S localhost:8000 public/index.php`, then
-   `siren listen --forward-to localhost:8000/siren`. Siren sends that app's
-   asks, tells and webhook events to the handler on your machine, signed
-   with the app's own secret.
-3. Run `siren trigger ask <app> <feature>` to send the feature's sample
-   request through it now, marked as a test.
+1. Run `siren apps apply` with a sandbox key, one that starts with
+   `sk_test_`. On a sandbox the app needs no address, and apply writes the
+   app's key to `.env.sandbox` as `SIREN_API_KEY`. An app with no address
+   gets no signing secret, so the file holds no `SIREN_SIGNING_SECRET` yet.
+2. In a terminal of its own, run
+   `siren listen --forward-to localhost:3000/siren` and leave it open. When
+   it first opens a session it writes the signing secret to `.env.sandbox`
+   as `SIREN_SIGNING_SECRET`, and from then on Siren sends that app's asks,
+   tells and webhook events to the handler on your machine, signed with it.
+3. Start the app with the file loaded. The handler reads the process's
+   environment, and nothing reads `.env.sandbox` by itself, so export its
+   lines first. With the sample above in `app.php`, which `php -S` runs
+   for every path, `/siren` included:
 
-`siren listen` and `siren trigger` arrive with the CLI's next release.
+   ```sh
+   set -a; . ./.env.sandbox; set +a; php -S localhost:3000 app.php
+   ```
+
+   Restart the app whenever `siren listen` says it saved a new secret.
+4. Run `siren trigger ask <app> <feature>` to send the feature's sample
+   request through it now, marked as a test. On a live Siren it needs
+   `--live` and a yes, and it refuses a payout method.
+
+`siren listen`, `siren trigger`, and `siren apps apply` with no address on
+a sandbox arrive with the CLI's next release.
 
 The `siren` command comes with the Node package. Without a Node project, run
 any `siren` command in this README through npx, such as
-`npx @novatorius/siren listen --forward-to localhost:8000/siren`,
+`npx @novatorius/siren listen --forward-to localhost:3000/siren`,
 `npx @novatorius/siren apps resend <id>`, or
 `npx @novatorius/siren apps rotate-key <app key>`, which the 401 on the
 answer route names when Siren does not accept the app's key.
@@ -325,9 +354,10 @@ and the logger still writes the debug lines. `clock`, a function that
 returns the time in seconds, is for tests.
 
 A request whose signature fails gets its 401, and `onError` hears it as a
-`SignatureVerificationException` whose code says why: `signature_mismatch`,
-`signature_stale`, `signature_header_missing`,
-`signature_timestamp_mismatch` or `signature_header_malformed`. The default
+`SignatureVerificationException` whose code says why, the same codes Node
+and Python use: `signature_missing`, `signature_malformed`,
+`timestamp_mismatch`, `signature_mismatch` or `timestamp_out_of_tolerance`.
+The default
 warning says what to check, such as ``Siren request handler: the request
 signature does not match. Check SIREN_SIGNING_SECRET: it must be this app's
 signing secret, and it changes when the secret is rotated.`` A wrong secret
@@ -375,7 +405,9 @@ seconds, and so must an event's function.
 `on($kind, $key, $fn)` registers one feature, and `on($kind, $fn)` every
 feature of a kind. A function for the key wins. Each function gets the
 `AppRequest`, whose `id`, `mode`, `feature` (`kind`, `key` and `id`) and `data`
-hold what Siren sent. A tell's return value is not read. An ask's function
+hold what Siren sent. `test` is true on a test request, such as one from
+`siren trigger`, which must write nothing, and `isAsk()` says whether Siren
+waits for an answer. A tell's return value is not read. An ask's function
 returns the answer as an array, or `$answers->later()` when the app will
 answer later with `apps->requests->answer()`. An ask's function that returns
 nothing is an error, which `onError` hears, and nothing is posted.
@@ -566,6 +598,9 @@ that picks this action. `data` is a `PostAllocationActionTell`: the `allocation`
 <!-- readme-test: answer-allocation -->
 ```php
     ->on('postAllocationAction', 'note-the-share', function ($request) {
+        if ($request->test) {
+            return; // a test from `siren trigger`: write nothing
+        }
         // Siren may send it twice, so note it once, keyed by $request->id.
         noteShare($request->id, $request->data['allocation']);
     })
@@ -1345,6 +1380,22 @@ rotate-key` gives the app a new key. A PHP project runs both with `npx
 `api_key_not_accepted`, so a leaked key can never make, change or revoke
 keys.
 
+In code, a signed-in admin's session token does the same through `apps`.
+`createKey()` gives an app with no key a new one, `rotateKey()` replaces
+it, and both answer the app with `rawKey`, shown this once. `revokeKey()`
+revokes it, and `scopes()` lists the scopes a key may hold, grouped as
+`events`, `ledger` and each `records:` resource. This SDK has no call that
+makes an app or gives it an address. Use `siren apps apply` or Siren Cloud.
+
+```php
+$siren = new Siren(['accessToken' => $sessionToken]);
+
+$app = $siren->apps->createKey('acme-crm', ['scopes' => [ApiKeyScope::ALL_EVENTS]]);
+$app = $siren->apps->rotateKey('acme-crm'); // $app['rawKey'] is the new key
+$siren->apps->revokeKey('acme-crm');
+$groups = $siren->apps->scopes();           // ['events' => [...], 'ledger' => [...], ...]
+```
+
 `ApiKeyScope` and `ApiKeyRecordScope` name the scopes a key may hold:
 
 | Scope | What the key can do |
@@ -1801,13 +1852,17 @@ Siren's `saas/Auth/ApiKeyRoutes.php` and the controllers it names.
 | `apps->requests->list($params)` | `siren.apps.requests.list(params)` | `GET /apps/requests` | an admin's session |
 | `apps->requests->retrieve($id)` | `siren.apps.requests.retrieve(id)` | `GET /apps/requests/{id}` | an admin's session |
 | `apps->requests->resend($id)` | `siren.apps.requests.resend(id)` | `POST /apps/requests/{id}/resend` | an admin's session |
+| `apps->scopes()` | `siren.apps.scopes()` | `GET /apps/scopes` | an admin's session |
+| `apps->createKey($appKey, $params)` | `siren.apps.createKey(key, params)` | `POST /apps/{key}/key` | an admin's session |
+| `apps->rotateKey($appKey)` | `siren.apps.rotateKey(key)` | `POST /apps/{key}/key/rotate` | an admin's session |
+| `apps->revokeKey($appKey)` | `siren.apps.revokeKey(key)` | `DELETE /apps/{key}/key` | an admin's session |
 | `apps->features->create($appKey, $params)` | `siren.apps.features.create(appKey, params)` | `POST /apps/{app}/features` | an admin's session |
 | `apps->features->retrieve($appKey, $id)` | `siren.apps.features.retrieve(appKey, id)` | `GET /apps/{app}/features/{id}` | an admin's session |
 | `apps->features->update($appKey, $id, $params)` | `siren.apps.features.update(appKey, id, params)` | `PATCH /apps/{app}/features/{id}` | an admin's session |
 | `apps->features->delete($appKey, $id)` | `siren.apps.features.delete(appKey, id)` | `DELETE /apps/{app}/features/{id}` | an admin's session |
 | `apps->requestHandler($signingSecret, $options)`, with `on`, `onEvent`, `serve`, `psr15`, `answer` and `simulate`. The secret defaults to `SIREN_SIGNING_SECRET`. | `siren.apps.requestHandler(options)`, with `on`, `onEvent`, `handle`, `simulate` and its Node, Web and Fastify mounts | `POST /apps/requests/{id}/answer` for an ask's answer, to the client's `baseUrl` only | the app's key |
 | `$answers->later()`, which an ask's function returns to answer later. Returning nothing is an error. | `answers.later()` | none | none |
-| `requestHandler()`'s `logger`, a PSR-3 logger | `requestHandler()`'s `logger`, anything with `debug`, `warn` and `error` | none | none |
+| `requestHandler()`'s `logger`, a PSR-3 logger | `requestHandler()`'s `logger`, anything with `debug`, `info`, `warn` and `error` | none | none |
 | `AppRequestHandler::TELL_TIME_LIMIT_SECONDS`, `AppSlowTellException` | `TELL_TIME_LIMIT_SECONDS`, `AppSlowTellError` | none | none |
 | `SignatureVerificationException` to `onError` on a refused signature | Node's signature error to `onError` | none | none |
 | `AppRequest::$test`, `AppRequests::make($kind, $key, ['test' => true])` | `request.test`, `appRequest(kind, key, { test: true })` | none | none |

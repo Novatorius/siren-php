@@ -971,11 +971,11 @@ final class AppRequestHandler
         $proxy = " Check that a proxy passes Siren's X-Siren-* headers through";
 
         return match ($error->getErrorCode()) {
-            SignatureVerificationException::MISMATCH => "the request signature does not match. Check SIREN_SIGNING_SECRET: it must be this app's signing secret, and it changes when the secret is rotated. Pass the raw body exactly as received.",
-            SignatureVerificationException::STALE => sprintf("the request's signed time is more than %d seconds from this machine's clock. Check the clock.", $this->tolerance),
-            SignatureVerificationException::HEADER_MISSING => 'the request has no X-Siren-Signature-V2 header.' . $proxy . '.',
+            SignatureVerificationException::SIGNATURE_MISMATCH => "the request signature does not match. Check SIREN_SIGNING_SECRET: it must be this app's signing secret, and it changes when the secret is rotated. Pass the raw body exactly as received.",
+            SignatureVerificationException::TIMESTAMP_OUT_OF_TOLERANCE => sprintf("the request's signed time is more than %d seconds from this machine's clock. Check the clock.", $this->tolerance),
+            SignatureVerificationException::SIGNATURE_MISSING => 'the request has no X-Siren-Signature-V2 header.' . $proxy . '.',
             SignatureVerificationException::TIMESTAMP_MISMATCH => 'the X-Siren-Timestamp header differs from the time X-Siren-Signature-V2 signed.' . $proxy . ' unchanged.',
-            SignatureVerificationException::HEADER_MALFORMED => 'the X-Siren-Signature-V2 header cannot be read.' . $proxy . ' unchanged.',
+            SignatureVerificationException::SIGNATURE_MALFORMED => 'the X-Siren-Signature-V2 header cannot be read.' . $proxy . ' unchanged.',
             default => lcfirst($error->getMessage()),
         };
     }

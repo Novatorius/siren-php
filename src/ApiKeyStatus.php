@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Siren\Sdk;
 
 /**
- * Statuses an API key can hold (the `apiKeys` resource).
+ * Statuses an app's API key can hold.
  */
 final class ApiKeyStatus
 {

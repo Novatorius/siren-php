@@ -10,7 +10,6 @@ use Siren\Sdk\Auth\StaticAccessToken;
 use Siren\Sdk\Http\GuzzleHttpClient;
 use Siren\Sdk\Http\HttpClient;
 use Siren\Sdk\Http\StreamHttpClient;
-use Siren\Sdk\Resources\ApiKeys;
 use Siren\Sdk\Resources\CollaboratorGroups;
 use Siren\Sdk\Resources\Collaborators;
 use Siren\Sdk\Resources\Conversions;
@@ -81,9 +80,6 @@ class Siren
 
     /** An app's side of Siren's exchange: `verifyRequest`, and `requests->answer`. */
     public readonly Apps $apps;
-
-    /** Manage API keys: `create`, `list`, `revoke`. Takes a signed-in dashboard session. */
-    public readonly ApiKeys $apiKeys;
 
     /** Conversions: list, read, create, update, delete, and bulk actions. */
     public readonly Conversions $conversions;
@@ -185,7 +181,6 @@ class Siren
         $this->events = new Events($transport, self::resolveAppTokens($config, $transport));
         $this->webhooks = new Webhooks($transport);
         $this->apps = new Apps($transport);
-        $this->apiKeys = new ApiKeys($transport);
         $this->conversions = new Conversions($transport);
         $this->transactions = new Transactions($transport);
         $this->obligations = new ListResource($transport, '/obligations');

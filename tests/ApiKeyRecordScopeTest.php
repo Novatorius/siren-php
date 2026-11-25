@@ -40,7 +40,7 @@ final class ApiKeyRecordScopeTest extends BaseTestCase
         return $constants;
     }
 
-    public function testPinsTheThirtyScopeStrings(): void
+    public function testPinsTheTwentyEightScopeStrings(): void
     {
         $this->assertSame([
             'ENGAGEMENTS_READ' => 'ledger:engagements:read',
@@ -50,8 +50,6 @@ final class ApiKeyRecordScopeTest extends BaseTestCase
             'OBLIGATIONS_READ' => 'ledger:obligations:read',
             'FULFILLMENTS_READ' => 'ledger:fulfillments:read',
             'PAYOUTS_READ' => 'ledger:payouts:read',
-            'WEBHOOKS_READ' => 'webhook-subscriptions:read',
-            'WEBHOOKS_MANAGE' => 'webhook-subscriptions:manage',
             'PRODUCTS_READ' => 'records:products:read',
             'PRODUCTS_MANAGE' => 'records:products:manage',
             'COUPONS_READ' => 'records:coupons:read',
@@ -81,14 +79,12 @@ final class ApiKeyRecordScopeTest extends BaseTestCase
         $this->assertSame(array_values(self::scopeConstants()), ApiKeyRecordScope::ALL);
     }
 
-    public function testAgreesWithTheLedgerAndWebhookNamesApiKeyScopeCarries(): void
+    public function testAgreesWithTheLedgerNamesApiKeyScopeCarries(): void
     {
         $this->assertSame(ApiKeyRecordScope::CONVERSIONS_READ, ApiKeyScope::LEDGER_CONVERSIONS_READ);
         $this->assertSame(ApiKeyRecordScope::TRANSACTIONS_READ, ApiKeyScope::LEDGER_TRANSACTIONS_READ);
         $this->assertSame(ApiKeyRecordScope::OBLIGATIONS_READ, ApiKeyScope::LEDGER_OBLIGATIONS_READ);
         $this->assertSame(ApiKeyRecordScope::PAYOUTS_READ, ApiKeyScope::LEDGER_PAYOUTS_READ);
-        $this->assertSame(ApiKeyRecordScope::WEBHOOKS_READ, ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_READ);
-        $this->assertSame(ApiKeyRecordScope::WEBHOOKS_MANAGE, ApiKeyScope::WEBHOOK_SUBSCRIPTIONS_MANAGE);
     }
 
     public function testCannotBeBuilt(): void

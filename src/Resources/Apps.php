@@ -7,12 +7,15 @@ namespace Siren\Sdk\Resources;
 use Siren\Sdk\AppRequest;
 use Siren\Sdk\AppAnswerPoster;
 use Siren\Sdk\AppRequestHandler;
+use Siren\Sdk\Exception\ApiException;
 use Siren\Sdk\Exception\SignatureVerificationException;
 use Siren\Sdk\HttpTransport;
 use Siren\Sdk\WebhookEvent;
 
 /**
- * An app's side of Siren's exchange: {@see requestHandler()}, which checks,
+ * An app's key and scopes, {@see createKey()}, {@see rotateKey()},
+ * {@see revokeKey()} and {@see scopes()}, which take a signed-in admin's
+ * session, and an app's side of Siren's exchange: {@see requestHandler()}, which checks,
  * routes and answers each request Siren sends the app, and the low-level
  * calls under it, {@see verifyRequest()} and `requests->answer()`, for an
  * app that queues the work or answers after a person decides.
@@ -40,11 +43,130 @@ final class Apps
     /** What posts and checks answers, shared by `requests` and the request handler. */
     private readonly AppAnswerPoster $poster;
 
-    public function __construct(HttpTransport $transport)
+    public function __construct(private readonly HttpTransport $transport)
     {
         $this->poster = new AppAnswerPoster($transport);
         $this->requests = new AppRequests($transport, $this->poster);
         $this->features = new AppFeatures($transport);
+    }
+
+    /**
+     * The scopes an app's key may hold, grouped by resource, from
+     * `GET /apps/scopes` (ListAppScopes.php in Siren), the groups the app
+     * form offers: `events`, `ledger` and each `records:` resource. Each
+     * entry is `{scope, resource, action, label}`. Takes a signed-in admin's
+     * session. Siren refuses an API key with 401 `api_key_not_accepted`.
+     * Retried as a read.
+     *
+     * @return array<string, list<array{scope: string, resource: string, action: string, label: string}>>
+     *
+     * @throws ApiException When the body is not an object of scope lists.
+     */
+    public function scopes(): array
+    {
+        $body = $this->transport->request('GET', '/apps/scopes')->json();
+
+        foreach ($body as $group => $scopes) {
+            if (!is_string($group) || !is_array($scopes) || !array_is_list($scopes) || array_filter($scopes, static fn (mixed $scope): bool => !is_array($scope)) !== []) {
+                throw new ApiException('Siren answered GET /apps/scopes with a body that is not an object of scope lists.', 200, null, $body);
+            }
+        }
+
+        /** @var array<string, list<array{scope: string, resource: string, action: string, label: string}>> */
+        return $body;
+    }
+
+    /**
+     * Makes a key for an app that has none with `POST /apps/{key}/key`, sent
+     * once, holding `$params['scopes']` or none. Answers the app with
+     * `rawKey`, shown this once. Takes a signed-in admin's session, and
+     * Siren refuses an API key with 401 `api_key_not_accepted`.
+     *
+     * Refuses a bad app key and any field but `scopes` with
+     * `InvalidArgumentException` before sending. Siren answers 409
+     * `app_key_exists` when the app holds an active key, and 400 when the
+     * organization holds its cap of keys. Throws {@see ApiException} when the
+     * 2xx body is not an app with `rawKey`. Siren had made the key by then,
+     * so rotate it to get one you can read.
+     *
+     * Mirrors `siren.apps.createKey()` in the Node SDK.
+     *
+     * @param array{scopes?: list<string>} $params
+     *
+     * @return array<string, mixed> The app, with `rawKey`.
+     */
+    public function createKey(string $appKey, array $params = []): array
+    {
+        $path = AppFeatures::appPath($appKey, 'apps->createKey()') . '/key';
+
+        foreach (array_keys($params) as $field) {
+            if ($field !== 'scopes') {
+                throw new \InvalidArgumentException(sprintf('apps->createKey() does not take %s.', $field));
+            }
+        }
+
+        return self::appWithKey($this->transport->request('POST', $path, $params === [] ? null : $params, [], retryable: false)->json(), 'POST ' . $path, 'Rotate the key with apps->rotateKey() to get a new one.');
+    }
+
+    /**
+     * Replaces the app's key with `POST /apps/{key}/key/rotate`, sent once.
+     * The old key stops working at once, the new one keeps its scopes, and
+     * the signing secret never changes with the key. Answers the app with
+     * `rawKey`, shown this once. Takes a signed-in admin's session.
+     *
+     * Refuses a bad app key with `InvalidArgumentException` before sending.
+     * Siren answers 409 `app_key_missing` for an app with no key. Throws
+     * {@see ApiException} when the 2xx body is not an app with `rawKey`.
+     * Siren had rotated the key by then, so rotate again.
+     *
+     * Mirrors `siren.apps.rotateKey()` in the Node SDK.
+     *
+     * @return array<string, mixed> The app, with `rawKey`.
+     */
+    public function rotateKey(string $appKey): array
+    {
+        $path = AppFeatures::appPath($appKey, 'apps->rotateKey()') . '/key/rotate';
+
+        return self::appWithKey($this->transport->request('POST', $path, null, [], retryable: false)->json(), 'POST ' . $path, 'Rotate the key again to get one you can read.');
+    }
+
+    /**
+     * Revokes the app's key with `DELETE /apps/{key}/key`, sent once, and
+     * answers the app, which keeps its address. Takes a signed-in admin's
+     * session. Refuses a bad app key with `InvalidArgumentException` before
+     * sending. Siren answers 409 `app_key_missing` for an app with no key,
+     * `app_needs_a_part` for an app with no address, and
+     * `app_features_need_key_and_address` for an app with features.
+     *
+     * Mirrors `siren.apps.revokeKey()` in the Node SDK.
+     *
+     * @return array<string, mixed> The app.
+     */
+    public function revokeKey(string $appKey): array
+    {
+        $path = AppFeatures::appPath($appKey, 'apps->revokeKey()') . '/key';
+        $body = $this->transport->request('DELETE', $path, null, [], retryable: false)->json();
+
+        if (!is_string($body['key'] ?? null)) {
+            throw new ApiException(sprintf('Siren answered DELETE %s with a body that is not an app.', $path), 200, null, $body);
+        }
+
+        return $body;
+    }
+
+    /**
+     * @param array<int|string, mixed> $body
+     *
+     * @return array<string, mixed>
+     */
+    private static function appWithKey(array $body, string $route, string $then): array
+    {
+        if (!is_string($body['key'] ?? null) || !is_string($body['rawKey'] ?? null)) {
+            throw new ApiException(sprintf('Siren answered %s with a body that is not an app with its rawKey. %s', $route, $then), 200, null, $body);
+        }
+
+        /** @var array<string, mixed> $body */
+        return $body;
     }
 
     /**
@@ -266,7 +388,7 @@ final class Apps
         $v2 = self::header($headers, 'X-Siren-Signature-V2');
 
         if ($v2 === null) {
-            throw new SignatureVerificationException('The request has no X-Siren-Signature-V2 header.', 0, SignatureVerificationException::HEADER_MISSING);
+            throw new SignatureVerificationException('The request has no X-Siren-Signature-V2 header.', 0, SignatureVerificationException::SIGNATURE_MISSING);
         }
 
         [$t, $signatures] = self::readSignatureHeader($v2);
@@ -289,7 +411,7 @@ final class Apps
             throw new SignatureVerificationException(
                 'The request signature does not match. Pass the raw body exactly as received and the signing secret of this app.',
                 0,
-                SignatureVerificationException::MISMATCH,
+                SignatureVerificationException::SIGNATURE_MISMATCH,
             );
         }
 
@@ -297,7 +419,7 @@ final class Apps
             throw new SignatureVerificationException(sprintf(
                 "The request's signed timestamp is more than %d seconds from this machine's clock, so it may be a replay. Check the clock if every request fails.",
                 $tolerance,
-            ), 0, SignatureVerificationException::STALE);
+            ), 0, SignatureVerificationException::TIMESTAMP_OUT_OF_TOLERANCE);
         }
 
         return $t;
@@ -375,7 +497,7 @@ final class Apps
             throw new SignatureVerificationException(
                 'The X-Siren-Signature-V2 header cannot be read. Siren sends t=<seconds>,v1=<hex signature>.',
                 0,
-                SignatureVerificationException::HEADER_MALFORMED,
+                SignatureVerificationException::SIGNATURE_MALFORMED,
             );
         }
 

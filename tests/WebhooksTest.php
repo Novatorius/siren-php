@@ -259,66 +259,6 @@ final class WebhooksTest extends TestCase
         $this->assertTrue($siren->webhooks->verifySignature($body, $upper, self::SECRET));
     }
 
-    public function testSubscriptionCreatePostsAndReturnsTheSigningSecret(): void
-    {
-        $siren = $this->mockSiren([
-            self::jsonResponse(201, [
-                'id' => 12,
-                'targetUrl' => 'https://example.com/webhooks/siren',
-                'events' => ['conversion.approved', 'payout.paid'],
-                'status' => 'active',
-                'signingSecret' => 'whsec_only_returned_once',
-            ]),
-        ]);
-
-        $subscription = $siren->webhooks->subscriptions->create([
-            'targetUrl' => 'https://example.com/webhooks/siren',
-            'events' => [WebhookEventType::CONVERSION_APPROVED, WebhookEventType::PAYOUT_PAID],
-        ]);
-
-        $request = $this->lastRequest();
-        $this->assertSame('POST', $request->getMethod());
-        $this->assertSame('https://api.sirenaffiliates.com/siren/v1/webhooks', (string) $request->getUri());
-        $this->assertSame(
-            [
-                'targetUrl' => 'https://example.com/webhooks/siren',
-                'events' => ['conversion.approved', 'payout.paid'],
-            ],
-            $this->lastRequestJson(),
-        );
-        $this->assertSame('whsec_only_returned_once', $subscription['signingSecret']);
-    }
-
-    public function testSubscriptionCreateIsNeverAutoRetried(): void
-    {
-        $siren = $this->mockSiren([
-            self::errorResponse(500, 'boom'),
-            self::jsonResponse(201, ['id' => 1]),
-        ]);
-
-        try {
-            $siren->webhooks->subscriptions->create([
-                'targetUrl' => 'https://example.com/hook',
-                'events' => [WebhookEventType::ALL],
-            ]);
-            $this->fail('Expected an ApiException.');
-        } catch (ApiException $e) {
-            $this->assertSame(500, $e->getStatusCode());
-        }
-
-        $this->assertCount(1, $this->history, 'A failed create must not be retried.');
-        $this->assertSame([], $this->sleeps, 'No backoff sleep should have happened.');
-    }
-
-    public function testSubscriptionCreateRequiresTargetUrlAndEvents(): void
-    {
-        $siren = $this->mockSiren([]);
-
-        $this->expectException(\InvalidArgumentException::class);
-
-        $siren->webhooks->subscriptions->create(['targetUrl' => 'https://example.com/hook']);
-    }
-
     public function testSubscriptionListReturnsTheBareJsonArray(): void
     {
         $siren = $this->mockSiren([

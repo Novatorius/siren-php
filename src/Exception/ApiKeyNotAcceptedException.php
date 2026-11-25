@@ -9,9 +9,9 @@ namespace Siren\Sdk\Exception;
  * ({@see ErrorCode::API_KEY_NOT_ACCEPTED}).
  *
  * The key itself may be valid. The route needs a signed-in dashboard
- * session instead, as every `/api-keys` route does. An API key sends events,
- * and with the scopes in {@see \Siren\Sdk\ApiKeyScope} it reads the ledger
- * and manages webhook subscriptions. Retrying with the same key fails again.
+ * session instead, as every `/apps` and `/webhooks` route does. An API key
+ * sends events, and with the scopes in {@see \Siren\Sdk\ApiKeyScope} it
+ * reads the ledger. Retrying with the same key fails again.
  */
 class ApiKeyNotAcceptedException extends AuthenticationException
 {
