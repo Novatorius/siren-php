@@ -333,6 +333,7 @@ PHP;
     private static function release(string $id): void
     {
         @unlink(self::$holdDir . '/' . $id);
+        @unlink(self::$holdDir . '/' . $id . '.held');
     }
 
     /** @return list<array<string, mixed>> The fake Siren's log lines for one request's answer. */
@@ -461,6 +462,43 @@ PHP;
             'payoutMethod' => [['payOnce', [$data['payout']['id'] ?? null, $data['collaborator'] ?? null, $data['amount'] ?? null]]],
         ];
         $this->assertSame($helpers[$kind] ?? [], self::lines(self::$stubLog));
+    }
+
+    /**
+     * The hold the ask tests lean on: an answer held for a request goes
+     * through soon after the test removes its hold file, well inside the
+     * 30 seconds the fake Siren would otherwise wait.
+     */
+    public function testTheFakeSirenLetsAHeldAnswerGoOnceReleased(): void
+    {
+        $id = 'apr_' . bin2hex(random_bytes(16));
+        touch(self::$holdDir . '/' . $id);
+
+        $curl = new \GuzzleHttp\Handler\CurlMultiHandler();
+        $promise = (new Client(['handler' => \GuzzleHttp\HandlerStack::create($curl), 'http_errors' => false, 'timeout' => self::ANSWER_WAIT_S + 10]))
+            ->postAsync(self::$sirenUrl . '/apps/requests/' . $id . '/answer', [
+                'json' => ['outcome' => 'paid', 'reference' => 'TX-1'],
+                'headers' => ['Authorization' => 'Bearer ' . self::APP_KEY],
+            ]);
+
+        $until = microtime(true) + self::ANSWER_WAIT_S;
+
+        while (!is_file(self::$holdDir . '/' . $id . '.held') && microtime(true) < $until) {
+            $curl->tick();
+            usleep(10_000);
+            clearstatcache();
+        }
+
+        $this->assertFileExists(self::$holdDir . '/' . $id . '.held', 'The fake Siren never held the answer.');
+        $this->assertSame([], self::answersTo($id));
+
+        $released = microtime(true);
+        self::release($id);
+        $response = $promise->wait();
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertLessThan(10.0, microtime(true) - $released, 'The fake Siren kept holding the answer after its release.');
+        $this->assertCount(1, self::answersTo($id));
     }
 
     public function testThePayoutSampleAnswersATestRequestWithoutPaying(): void
@@ -603,8 +641,11 @@ PHP;
         self::assertIsResource($process);
         self::$servers[] = $process;
 
-        for ($i = 0; $i < 100; $i++) {
-            $probe = @fsockopen('127.0.0.1', $port);
+        // A loaded machine can take seconds to start PHP, so wait up to 30.
+        $until = microtime(true) + 30;
+
+        while (microtime(true) < $until) {
+            $probe = @fsockopen('127.0.0.1', $port, $errno, $error, 1.0);
 
             if ($probe !== false) {
                 fclose($probe);

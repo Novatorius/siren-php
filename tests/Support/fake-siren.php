@@ -26,11 +26,17 @@ $answerRoute = preg_match('#^/siren/v1/apps/requests/(apr_[0-9a-f]{32})/answer$#
 $delay = (int) getenv('FAKE_SIREN_ANSWER_DELAY_MS');
 $holdDir = getenv('FAKE_SIREN_HOLD_DIR');
 
-if ($answerRoute && is_string($holdDir) && $holdDir !== '') {
+if ($answerRoute && is_string($holdDir) && $holdDir !== '' && is_file($holdDir . '/' . $answered[1])) {
+    // Says it holds the answer, so a test can wait for the hold itself.
+    touch($holdDir . '/' . $answered[1] . '.held');
     $until = microtime(true) + 30;
 
+    // PHP caches is_file() within a request, so without clearstatcache()
+    // the hold never sees the test remove the file and lasts the full 30
+    // seconds, past the test's own wait.
     while (is_file($holdDir . '/' . $answered[1]) && microtime(true) < $until) {
         usleep(20_000);
+        clearstatcache(true, $holdDir . '/' . $answered[1]);
     }
 }
 

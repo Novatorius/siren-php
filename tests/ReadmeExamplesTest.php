@@ -263,8 +263,11 @@ final class ReadmeExamplesTest extends TestCase
         self::assertIsResource($process);
         self::$servers[] = $process;
 
-        for ($i = 0; $i < 100; $i++) {
-            $probe = @fsockopen('127.0.0.1', $port);
+        // A loaded machine can take seconds to start PHP, so wait up to 30.
+        $until = microtime(true) + 30;
+
+        while (microtime(true) < $until) {
+            $probe = @fsockopen('127.0.0.1', $port, $errno, $error, 1.0);
 
             if ($probe !== false) {
                 fclose($probe);
