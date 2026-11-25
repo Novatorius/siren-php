@@ -248,8 +248,9 @@ When the app is gone, `featureKey` is null, so pass the feature's key as
 the second argument, such as `fromRecord($record, 'split-by-score')`.
 `fromRecord()` also takes the row an admin's session reads with
 `apps->requests->retrieve()`, which names the feature only as `app:31`, with
-the key passed the same way. A record with no key and none passed throws
-`AppHandlerException`.
+the key passed the same way. A key you pass wins over the saved one, so a
+request replays against a renamed feature. A record with no key and none
+passed throws `AppHandlerException`.
 
 ## Develop on your machine
 
@@ -1221,8 +1222,8 @@ if ($page !== []) {
 }
 ```
 
-Siren ignores `limit` and `before` for `needs_attention`, whose list comes
-whole.
+Siren answers `needs_attention` whole, so `list()` refuses `limit` or
+`before` with it.
 `resend()` is sent once. Siren applies a stored answer it hasn't applied
 instead of sending the request again, and answers 409
 `app_request_not_resendable` for a request that is `applied`, a `delivered`
@@ -1903,7 +1904,7 @@ the subscription calls sit on `WebhookSubscriptions` beside `create`, `list`,
 | `webhooks->subscriptions->update` | no | an id below 1, any key outside `UPDATE_FIELDS` whatever its value, and an update with no field that is not `null` |
 | `webhooks->subscriptions->test` | no | an id below 1 |
 | `webhooks->subscriptions->deliveries` | yes | an id below 1 |
-| `apps->requests->list` | yes | a key other than `status`, `limit` and `before`, a status outside `STATUSES`, a `limit` outside 1 to 100, and a `before` that is not a request id |
+| `apps->requests->list` | yes | a key other than `status`, `limit` and `before`, a status outside `STATUSES`, a `limit` outside 1 to 100, a `before` that is not a request id, and either with `needs_attention` |
 | `apps->requests->retrieve` | yes | an id that is not `apr_` and 32 lowercase hex characters |
 | `apps->requests->resend` | no | an id that is not `apr_` and 32 lowercase hex characters |
 | `apps->features->create` | no | a bad app key, a field outside `CREATE_FIELDS`, no `kind` or `name`, and `fulfillmentMethod` |

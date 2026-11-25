@@ -45,7 +45,7 @@ final class AppRequests
      * - `id`: the request id. Defaults to a new `apr_` and 32 hex characters.
      * - `app`: the app's key. Defaults to {@see DEFAULT_APP}.
      * - `baseUrl`: the Siren the request comes from, which `answerUrl` is built on.
-     *   Defaults to Siren Cloud's, as a client's does.
+     *   Defaults to a non-empty `SIREN_BASE_URL`, then Siren Cloud's, as a client's does.
      * - `timestamp`: the Unix time to sign at. Defaults to now.
      * - `test`: true for a test request, as `siren trigger ask` sends one, with `"test": true` after `mode`.
      *   Siren checks a test ask's answer and applies nothing.
@@ -75,9 +75,11 @@ final class AppRequests
      * saves, as an array or its JSON text. It holds Siren's request with
      * `appKey` and `featureKey` beside it, so no key needs passing. A row
      * `GET /apps/requests/{id}` gives names its feature only as `app:12`, so
-     * pass the key with it, which `siren apps show <app>` lists. `$key` is
-     * used only when the record holds no key, such as a saved request whose
-     * app is gone, where `featureKey` is null.
+     * pass the key with it, which `siren apps show <app>` lists. A `$key`
+     * passed in wins over the record's, as in Node, so a request replays
+     * against a renamed feature. The record's key is used when none is
+     * passed. A saved request whose app is gone has a null `featureKey`, so
+     * pass the key.
      *
      * ```php
      * $request = AppRequests::fromRecord(file_get_contents(__DIR__ . '/request.json'));
@@ -118,9 +120,9 @@ final class AppRequests
         $feature = $record['feature'] ?? null;
         $featureId = is_array($feature) && is_string($feature['id'] ?? null) ? $feature['id'] : (is_string($feature) ? $feature : 'app:1');
         $held = is_array($feature) && is_string($feature['key'] ?? null) ? $feature['key'] : ($record['featureKey'] ?? null);
-        $key = is_string($held) && $held !== '' ? $held : $key;
+        $key = $key !== null && $key !== '' ? $key : (is_string($held) && $held !== '' ? $held : null);
 
-        if ($key === null || $key === '') {
+        if ($key === null) {
             throw new AppHandlerException(sprintf(
                 "The record names its feature as %s, without the feature's key.%s Pass the key, such as AppRequests::fromRecord(\$record, 'split-by-score'). `siren apps show <app>` lists each feature's key.",
                 $featureId,
@@ -259,6 +261,18 @@ final class AppRequests
     }
 
     /**
+     * A non-empty `SIREN_BASE_URL` environment variable, else Siren Cloud, as
+     * `new Siren()` picks its base URL, so a test request's `answerUrl`
+     * points at the Siren the client answers.
+     */
+    private static function baseUrlFromEnvironment(): string
+    {
+        $fromEnvironment = getenv('SIREN_BASE_URL');
+
+        return is_string($fromEnvironment) && $fromEnvironment !== '' ? $fromEnvironment : Siren::DEFAULT_BASE_URL;
+    }
+
+    /**
      * @param array<string, mixed> $options
      * @param array{mode?: string, featureId?: string, createdAt?: string|null, answerBy?: string|null} $stored A stored request's own values.
      *
@@ -274,7 +288,7 @@ final class AppRequests
         }
 
         $id = $options['id'] ?? 'apr_' . bin2hex(random_bytes(16));
-        $base = rtrim($options['baseUrl'] ?? Siren::DEFAULT_BASE_URL, '/');
+        $base = rtrim($options['baseUrl'] ?? self::baseUrlFromEnvironment(), '/');
         $at = (new \DateTimeImmutable('@' . $timestamp))->setTimezone(new \DateTimeZone('UTC'));
 
         $body = [

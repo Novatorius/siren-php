@@ -122,14 +122,14 @@ final class AppRequests
      *   than it, so the last id of one page reads the next. Siren lists none
      *   for an id the organization has no request for.
      *
-     * Siren ignores `limit` and `before` for `needs_attention`, whose list
-     * comes whole.
+     * Siren answers `needs_attention` whole, so `limit` or `before` with it
+     * is refused, as in Node.
      *
      * @param array{status?: string, limit?: int, before?: string} $params
      *
      * @return list<AppRequestRecord>
      *
-     * @throws \InvalidArgumentException For a param other than {@see LIST_FILTERS}, a status outside {@see STATUSES}, a `limit` that is not a whole number from 1 to 100, or a `before` that is not a request id.
+     * @throws \InvalidArgumentException For a param other than {@see LIST_FILTERS}, a status outside {@see STATUSES}, a `limit` that is not a whole number from 1 to 100, a `before` that is not a request id, or either with `needs_attention`.
      * @throws ApiException When Siren answers 2xx with no list of requests.
      * @throws SirenException When Siren refuses it.
      */
@@ -149,6 +149,10 @@ final class AppRequests
 
         if ($status !== null && !in_array($status, self::STATUSES, true)) {
             throw new \InvalidArgumentException(sprintf('apps->requests->list() takes a status of %s.', implode(', ', self::STATUSES)));
+        }
+
+        if ($status === 'needs_attention' && (array_key_exists('limit', $params) || array_key_exists('before', $params))) {
+            throw new \InvalidArgumentException('apps->requests->list() pages the plain list only. Siren answers needs_attention whole, so leave out limit and before.');
         }
 
         $query = $status === null ? [] : ['status' => $status];

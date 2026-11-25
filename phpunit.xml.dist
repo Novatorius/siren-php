@@ -9,6 +9,12 @@
          displayDetailsOnTestsThatTriggerErrors="true"
          displayDetailsOnTestsThatTriggerNotices="true"
          displayDetailsOnTestsThatTriggerWarnings="true">
+    <php>
+        <!-- A shell with .env.sandbox loaded sets SIREN_BASE_URL. The suite's
+             own expectations name Siren Cloud, so it runs without it. Tests of
+             the variable set it themselves. -->
+        <env name="SIREN_BASE_URL" value="" force="true"/>
+    </php>
     <testsuites>
         <testsuite name="unit">
             <directory>tests</directory>
