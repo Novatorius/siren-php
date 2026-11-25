@@ -5,8 +5,12 @@
 // send address on 127.0.0.1, the way docs/architecture/apps-event-tokens.md
 // (sections 1 and 2) describes them, and the answer route an app posts an
 // ask's answer to. It writes each request it gets to the file FAKE_SIREN_LOG
-// names. FAKE_SIREN_ANSWER_DELAY_MS holds an answer that long before
-// writing it down, so a test can tell an app replied before it answered.
+// names. When FAKE_SIREN_HOLD_DIR names a folder holding a file named for a
+// request id, the answer to that request waits, unwritten, until the test
+// removes the file (30 seconds at most), so a test can see that an app
+// replied before its answer landed without timing anything.
+// FAKE_SIREN_ANSWER_DELAY_MS slows every answer by that much, to try a test
+// against a slow Siren.
 
 declare(strict_types=1);
 
@@ -18,8 +22,17 @@ $body = json_decode($raw, true);
 $body = is_array($body) ? $body : [];
 $authorization = (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? '');
 
-$answerRoute = preg_match('#^/siren/v1/apps/requests/(apr_[0-9a-f]{32})/answer$#', $path) === 1;
+$answerRoute = preg_match('#^/siren/v1/apps/requests/(apr_[0-9a-f]{32})/answer$#', $path, $answered) === 1;
 $delay = (int) getenv('FAKE_SIREN_ANSWER_DELAY_MS');
+$holdDir = getenv('FAKE_SIREN_HOLD_DIR');
+
+if ($answerRoute && is_string($holdDir) && $holdDir !== '') {
+    $until = microtime(true) + 30;
+
+    while (is_file($holdDir . '/' . $answered[1]) && microtime(true) < $until) {
+        usleep(20_000);
+    }
+}
 
 if ($answerRoute && $delay > 0) {
     usleep($delay * 1000);

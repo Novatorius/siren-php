@@ -31,8 +31,8 @@ final class AppRequestSamplesTest extends TestCase
 {
     private const APP_KEY = 'sk_test_fake_app_key';
 
-    /** How long the fake Siren holds an answer before writing it down. */
-    private const ANSWER_DELAY_MS = 1500;
+    /** How long a test waits for an answer to land once it is free to. */
+    private const ANSWER_WAIT_S = 30.0;
 
     /** Section 5.1, the whole PHP sample. */
     private const TELL_THE_CRM = <<<'PHP'
@@ -109,6 +109,12 @@ PHP;
     /** The stubs for the sample's own helpers, prepended to every request. */
     private const PRELUDE = <<<'PHP'
 <?php
+// SAMPLES_APP_DELAY_MS slows every request to the app, to try the tests
+// against a slow or loaded machine.
+if ((int) getenv('SAMPLES_APP_DELAY_MS') > 0) {
+    usleep((int) getenv('SAMPLES_APP_DELAY_MS') * 1000);
+}
+
 function addToCrm(...$args): void
 {
     file_put_contents(getenv('STUB_LOG'), json_encode(['addToCrm', $args]) . "\n", FILE_APPEND | LOCK_EX);
@@ -175,6 +181,7 @@ PHP;
     private static string $dir = '';
     private static string $sirenLog = '';
     private static string $stubLog = '';
+    private static string $holdDir = '';
     private static string $app = '';
     private static string $sirenUrl = '';
 
@@ -182,6 +189,8 @@ PHP;
     {
         self::$dir = sys_get_temp_dir() . '/siren-samples-' . bin2hex(random_bytes(4));
         mkdir(self::$dir . '/app', 0777, true);
+        self::$holdDir = self::$dir . '/hold';
+        mkdir(self::$holdDir);
         self::$sirenLog = self::$dir . '/siren.log';
         self::$stubLog = self::$dir . '/stub.log';
         touch(self::$sirenLog);
@@ -189,7 +198,7 @@ PHP;
 
         $siren = 'http://127.0.0.1:' . self::serve(['-S', '127.0.0.1:%d', __DIR__ . '/Support/fake-siren.php'], [
             'FAKE_SIREN_LOG' => self::$sirenLog,
-            'FAKE_SIREN_ANSWER_DELAY_MS' => (string) self::ANSWER_DELAY_MS,
+            'FAKE_SIREN_HOLD_DIR' => self::$holdDir,
         ]) . '/siren/v1';
 
         $samples = [
@@ -234,13 +243,14 @@ PHP;
 
         self::$servers = [];
 
-        foreach (['/app/*.php', '/*.php', '/*.log'] as $pattern) {
+        foreach (['/app/*.php', '/*.php', '/*.log', '/hold/*'] as $pattern) {
             foreach (glob(self::$dir . $pattern) ?: [] as $file) {
                 unlink($file);
             }
         }
 
         @unlink(self::$dir . '/app/vendor');
+        @rmdir(self::$dir . '/hold');
         @rmdir(self::$dir . '/app');
         @rmdir(self::$dir);
     }
@@ -295,21 +305,43 @@ PHP;
 
     /**
      * Signs the kind's request now with the SDK's testing helper, its
-     * answerUrl on the fake Siren, and posts it.
+     * answerUrl on the fake Siren, and posts it. Each request gets its own
+     * id, so an answer that lands late, after its test ended, can't pass for
+     * another test's answer. With `$hold`, the fake Siren holds this
+     * request's answer until {@see release()}.
      *
-     * @return array{0: int, 1: string, 2: float}
+     * @return array{0: int, 1: string, 2: string} The status, the body and the request's id.
      */
-    private static function send(string $file, string $kind, bool $test = false): array
+    private static function send(string $file, string $kind, bool $test = false, bool $hold = false): array
     {
-        $request = self::signedContract($kind, self::secret(), self::$sirenUrl, $test);
-        $started = microtime(true);
+        $id = 'apr_' . bin2hex(random_bytes(16));
+        $request = self::signedContract($kind, self::secret(), self::$sirenUrl, $test, $id);
 
-        $response = (new Client(['http_errors' => false, 'timeout' => 10]))->request($request->method, self::$app . '/' . $file . '.php', [
+        if ($hold) {
+            touch(self::$holdDir . '/' . $id);
+        }
+
+        $response = (new Client(['http_errors' => false, 'timeout' => self::ANSWER_WAIT_S]))->request($request->method, self::$app . '/' . $file . '.php', [
             'body' => $request->rawBody,
             'headers' => $request->headers + ['User-Agent' => 'Siren-Webhooks/1.0'],
         ]);
 
-        return [$response->getStatusCode(), (string) $response->getBody(), microtime(true) - $started];
+        return [$response->getStatusCode(), (string) $response->getBody(), $id];
+    }
+
+    /** Lets the fake Siren take the answer it holds for this request. */
+    private static function release(string $id): void
+    {
+        @unlink(self::$holdDir . '/' . $id);
+    }
+
+    /** @return list<array<string, mixed>> The fake Siren's log lines for one request's answer. */
+    private static function answersTo(string $id): array
+    {
+        return array_values(array_filter(
+            self::lines(self::$sirenLog),
+            static fn(array $line): bool => $line['path'] === '/siren/v1/apps/requests/' . $id . '/answer',
+        ));
     }
 
     /** @return list<array<string, mixed>> */
@@ -321,16 +353,16 @@ PHP;
         ));
     }
 
-    /** @return array<string, mixed>|null The answer the fake Siren took, once it lands. */
-    private static function awaitAnswer(float $seconds): ?array
+    /** @return array<string, mixed>|null The answer the fake Siren took for this request, once it lands. */
+    private static function awaitAnswer(string $id, float $seconds = self::ANSWER_WAIT_S): ?array
     {
         $until = microtime(true) + $seconds;
 
         do {
-            foreach (self::lines(self::$sirenLog) as $line) {
-                if ($line['path'] === '/siren/v1/apps/requests/apr_9c60190a4501399d0ae55f041c237b39/answer') {
-                    return $line;
-                }
+            $answers = self::answersTo($id);
+
+            if ($answers !== []) {
+                return $answers[0];
             }
 
             usleep(50_000);
@@ -343,10 +375,10 @@ PHP;
     {
         $request = self::contract('postConversionAction')['request'];
 
-        [$status, $body] = self::send('tell-the-crm', 'postConversionAction');
+        [$status, $body, $id] = self::send('tell-the-crm', 'postConversionAction');
 
         $this->assertSame([200, '{}'], [$status, $body]);
-        $this->assertSame([['addToCrm', [$request['id'], $request['data']['conversion'], $request['data']['reward']]]], self::lines(self::$stubLog));
+        $this->assertSame([['addToCrm', [$id, $request['data']['conversion'], $request['data']['reward']]]], self::lines(self::$stubLog));
         $this->assertSame([], self::lines(self::$sirenLog), 'A tell posts nothing to Siren.');
     }
 
@@ -354,10 +386,10 @@ PHP;
     {
         $request = self::contract('postAllocationAction')['request'];
 
-        [$status, $body] = self::send('note-the-share', 'postAllocationAction');
+        [$status, $body, $id] = self::send('note-the-share', 'postAllocationAction');
 
         $this->assertSame([200, '{}'], [$status, $body]);
-        $this->assertSame([['noteShare', [$request['id'], $request['data']['allocation']]]], self::lines(self::$stubLog));
+        $this->assertSame([['noteShare', [$id, $request['data']['allocation']]]], self::lines(self::$stubLog));
         $this->assertSame([], self::lines(self::$sirenLog));
     }
 
@@ -400,13 +432,19 @@ PHP;
     #[DataProvider('asks')]
     public function testAnAskGets200AtOnceAndSirenGetsTheFixturesAnswer(string $file, string $kind, ?array $expected = null): void
     {
-        [$status, $body, $took] = self::send($file, $kind);
+        // The fake Siren holds this answer until the reply is in, so the
+        // order shows without a clock: a handler that waited for its answer
+        // to land before replying would reply only after the 30-second hold.
+        [$status, $body, $id] = self::send($file, $kind, hold: true);
 
-        $this->assertSame([200, '{}'], [$status, $body]);
-        $this->assertLessThan(self::ANSWER_DELAY_MS / 1000, $took, 'The reply came before the answer was posted.');
-        $this->assertSame([], self::lines(self::$sirenLog), 'Siren had no answer yet when the reply came.');
+        try {
+            $this->assertSame([200, '{}'], [$status, $body]);
+            $this->assertSame([], self::answersTo($id), 'Siren had no answer yet when the reply came.');
+        } finally {
+            self::release($id);
+        }
 
-        $answer = self::awaitAnswer(10.0);
+        $answer = self::awaitAnswer($id);
 
         $this->assertNotNull($answer, 'The fake Siren got no answer.');
         $this->assertSame('POST', $answer['method']);
@@ -427,10 +465,10 @@ PHP;
 
     public function testThePayoutSampleAnswersATestRequestWithoutPaying(): void
     {
-        [$status, $body] = self::send('acme-ledger', 'payoutMethod', true);
+        [$status, $body, $id] = self::send('acme-ledger', 'payoutMethod', true);
 
         $this->assertSame([200, '{}'], [$status, $body]);
-        $answer = self::awaitAnswer(10.0);
+        $answer = self::awaitAnswer($id);
         $this->assertNotNull($answer, 'The fake Siren got no answer.');
         $this->assertSame(['outcome' => 'failed', 'reason' => 'A test request, so nothing was paid.'], $answer['body']);
         $this->assertNull(\Siren\Sdk\AppAnswerCheck::problem('payoutMethod', self::contract('payoutMethod')['request']['data'], $answer['body']));
@@ -439,10 +477,10 @@ PHP;
 
     public function testTheByHandSampleChecksTheRequestAndAnswersIt(): void
     {
-        [$status] = self::send('by-hand', 'payoutMethod');
+        [$status, , $id] = self::send('by-hand', 'payoutMethod');
 
         $this->assertSame(200, $status);
-        $answer = self::awaitAnswer(1.0);
+        $answer = self::answersTo($id)[0] ?? null;
         $this->assertNotNull($answer, 'The by-hand sample answered before it replied.');
         $this->assertSame('Bearer ' . self::APP_KEY, $answer['authorization']);
         $this->assertSame(['outcome' => 'paid', 'reference' => 'TX-1'], $answer['body']);
